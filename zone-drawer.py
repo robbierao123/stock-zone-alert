@@ -113,9 +113,6 @@ def draw_weekly_zones_chart(ticker: str, limit: int = 250, save_path: str | None
         overlap_min_touches=2
     )
 
-    print("Weekly candles:", len(weekly_candles))
-    print("Weekly zones:", weekly_zones)
-
     _draw_chart_from_candles(
         candles=weekly_candles,
         zones=weekly_zones,
@@ -125,10 +122,10 @@ def draw_weekly_zones_chart(ticker: str, limit: int = 250, save_path: str | None
 
 
 if __name__ == "__main__":
-    ticker = "pltr"
+    ticker = "uso"
 
     # Daily chart
-    draw_daily_zones_chart(ticker, limit=90)
+    draw_daily_zones_chart(ticker, limit=45)
 
     # Weekly chart
     draw_weekly_zones_chart(ticker, limit=250)
