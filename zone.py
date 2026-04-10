@@ -1,10 +1,9 @@
 import requests
 from datetime import datetime, timedelta
 import os
-
-
-
 import requests
+from dotenv import load_dotenv
+load_dotenv()
 
 API_KEY = os.getenv("FMP_API_KEY")
 

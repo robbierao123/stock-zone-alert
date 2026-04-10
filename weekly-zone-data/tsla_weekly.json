@@ -1,0 +1,33 @@
+{
+  "ticker": "TSLA",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 19,
+  "zone_count": 4,
+  "zones": [
+    {
+      "type": "support",
+      "low": 434.22,
+      "high": 435.3,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 416.38,
+      "high": 416.9,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 457.55,
+      "high": 458.87,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 452.43,
+      "high": 454.3,
+      "touches": 2
+    }
+  ]
+}

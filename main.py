@@ -1,32 +1,28 @@
-from zone_drawer import save_daily_zones_chart, save_weekly_zones_chart
-from SendAlert import send_ticker_charts
-from zone import *
+import json
 from pathlib import Path
-import json
-
-def run_for_ticker(ticker: str, daily_limit: int = 90, weekly_limit: int = 250) -> None:
-    # 1. generate and save images
-    daily_path = save_daily_zones_chart(ticker, limit=daily_limit)
-    weekly_path = save_weekly_zones_chart(ticker, limit=weekly_limit)
-
-    print(f"Saved daily chart: {daily_path}")
-    print(f"Saved weekly chart: {weekly_path}")
-
-    # 2. send to discord
-    send_ticker_charts(
-        ticker=ticker,
-        extra_message="Latest zones generated"
-    )
-
-import json
-
-
+from datetime import datetime
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
 from zone import (
     get_daily_ohlc_3m,
     detect_zones_from_daily,
     detect_zones_from_weekly,
     convert_daily_to_weekly,
+    get_latest_closed_5m_price,
 )
+
+from zone_drawer import (
+    save_daily_zones_chart,
+    save_weekly_zones_chart,
+)
+
+from SendAlert import send_message_with_image
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+DAILY_LIMIT = int(os.getenv("DAILY_LIMIT"))
+WEEKLY_LIMIT = int(os.getenv("WEEKLY_LIMIT"))
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -37,8 +33,8 @@ def _ensure_folder(folder_name: str) -> Path:
 
 def save_zone_data_for_ticker(
     ticker: str,
-    daily_limit: int = 90,
-    weekly_limit: int = 250,
+    daily_limit: int = DAILY_LIMIT,
+    weekly_limit: int = WEEKLY_LIMIT,
     daily_folder: str = "daily-zone-data",
     weekly_folder: str = "weekly-zone-data",
 ) -> tuple[str, str]:
@@ -53,7 +49,7 @@ def save_zone_data_for_ticker(
     daily_dir = _ensure_folder(daily_folder)
     weekly_dir = _ensure_folder(weekly_folder)
 
-    # Daily
+    # Daily zones
     daily_candles = get_daily_ohlc_3m(ticker, limit=daily_limit)
     daily_zones = detect_zones_from_daily(daily_candles)
 
@@ -69,7 +65,7 @@ def save_zone_data_for_ticker(
     with daily_path.open("w", encoding="utf-8") as f:
         json.dump(daily_payload, f, indent=2)
 
-    # Weekly
+    # Weekly zones
     weekly_source_daily = get_daily_ohlc_3m(ticker, limit=weekly_limit)
     weekly_candles = convert_daily_to_weekly(weekly_source_daily)
     weekly_zones = detect_zones_from_weekly(
@@ -97,26 +93,13 @@ def save_zone_data_for_ticker(
 
 def save_zone_data_for_tickers(
     tickers: list[str],
-    daily_limit: int = 90,
-    weekly_limit: int = 250,
+    daily_limit: int = DAILY_LIMIT,
+    weekly_limit: int = WEEKLY_LIMIT,
     daily_folder: str = "daily-zone-data",
     weekly_folder: str = "weekly-zone-data",
 ) -> dict[str, dict]:
     """
     Generate daily + weekly zone JSON files for a list of tickers.
-
-    Returns:
-        {
-            "SPY": {
-                "daily_json": "...",
-                "weekly_json": "...",
-                "status": "ok"
-            },
-            "TSLA": {
-                "status": "error",
-                "error": "..."
-            }
-        }
     """
     results = {}
 
@@ -148,8 +131,6 @@ def save_zone_data_for_tickers(
 
     return results
 
-from pathlib import Path
-
 
 def clear_zone_data(
     daily_folder: str = "daily-zone-data",
@@ -159,7 +140,6 @@ def clear_zone_data(
     Delete all files inside daily and weekly zone data folders.
     Keeps the folders themselves.
     """
-
     for folder_name in [daily_folder, weekly_folder]:
         folder = Path(folder_name)
 
@@ -172,31 +152,164 @@ def clear_zone_data(
                 if file.is_file():
                     file.unlink()
                 elif file.is_dir():
-                    # optional: delete subfolders too
                     import shutil
                     shutil.rmtree(file)
-
             except Exception as e:
                 print(f"Failed to delete {file}: {e}")
 
         print(f"Cleared folder: {folder_name}")
 
 
+def _load_zone_file(file_path: Path) -> dict:
+    if not file_path.exists():
+        return {"zones": []}
+
+    with file_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _check_ticker_zones_worker(
+    ticker: str,
+    daily_folder: str = "daily-zone-data",
+    weekly_folder: str = "weekly-zone-data",
+) -> dict:
+    """
+    Worker process:
+    - gets latest closed 5m price
+    - reads saved daily/weekly zone JSON
+    - returns matching zones
+    """
+    ticker_lc = ticker.lower()
+    price = get_latest_closed_5m_price(ticker_lc)
+
+    daily_path = Path(daily_folder) / f"{ticker_lc}_daily.json"
+    weekly_path = Path(weekly_folder) / f"{ticker_lc}_weekly.json"
+
+    daily_data = _load_zone_file(daily_path)
+    weekly_data = _load_zone_file(weekly_path)
+
+    matches = []
+
+    for zone in daily_data.get("zones", []):
+        if zone["low"] <= price <= zone["high"]:
+            matches.append({
+                "timeframe": "daily",
+                "zone": zone,
+            })
+
+    for zone in weekly_data.get("zones", []):
+        if zone["low"] <= price <= zone["high"]:
+            matches.append({
+                "timeframe": "weekly",
+                "zone": zone,
+            })
+
+    return {
+        "ticker": ticker.upper(),
+        "price": price,
+        "matches": matches,
+    }
+
+
+def _send_zone_hit_alert(ticker: str, price: float, timeframe: str, zone: dict) -> None:
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if timeframe == "daily":
+        image_path = save_daily_zones_chart(ticker, limit= DAILY_LIMIT)
+        title = "📊 Daily Zone Hit"
+    else:
+        image_path = save_weekly_zones_chart(ticker, limit=WEEKLY_LIMIT)
+        title = "📈 Weekly Zone Hit"
+
+    message = (
+        f"{title}\n"
+        f"Time: {now_str}\n"
+        f"Ticker: {ticker.upper()}\n"
+        f"5m Closed Price: {price:.2f}\n"
+        f"Zone Range: {zone['low']} - {zone['high']}\n"
+        f"Zone Type: {zone['type']}\n"
+        f"Touches: {zone['touches']}"
+    )
+
+    send_message_with_image(message, image_path)
+    print(f"Sent {timeframe} alert for {ticker.upper()} -> {zone['low']} - {zone['high']}")
+
+
+def monitor_tickers_and_alert(
+    tickers: list[str],
+    max_workers: int | None = None,
+    daily_folder: str = "daily-zone-data",
+    weekly_folder: str = "weekly-zone-data",
+) -> list[dict]:
+    """
+    One monitoring pass:
+    - multiprocess all tickers
+    - compare latest closed 5m price vs saved zones
+    - send Discord alert with image on hit
+    """
+    results = []
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _check_ticker_zones_worker,
+                ticker,
+                daily_folder,
+                weekly_folder,
+            ): ticker
+            for ticker in tickers
+        }
+
+        for future in as_completed(futures):
+            ticker = futures[future]
+
+            try:
+                result = future.result()
+                results.append(result)
+
+                if result["matches"]:
+                    for match in result["matches"]:
+                        _send_zone_hit_alert(
+                            ticker=result["ticker"],
+                            price=result["price"],
+                            timeframe=match["timeframe"],
+                            zone=match["zone"],
+                        )
+                else:
+                    print(f"No zone hit for {ticker.upper()} at price {result['price']:.2f}")
+
+            except Exception as e:
+                print(f"Error monitoring {ticker.upper()}: {e}")
+
+    return results
+
+
+
 
 if __name__ == "__main__":
-    # ticker = "qqq"
-    # run_for_ticker(ticker, daily_limit=45, weekly_limit=250)
+    tickers = ["spy", "qqq", "tsla", "mu"]
 
-    # price = get_latest_closed_5m_price("tsla")
-    # print(price)
+    # run once at start (build zone JSON)
+    print("Generating zone data...")
+    save_zone_data_for_tickers(
+        tickers=tickers,
+        daily_limit= DAILY_LIMIT,
+        weekly_limit=WEEKLY_LIMIT,
+    )
 
-    # tickers = ["spy", "qqq", "tsla", "mu"]
+    print("Start monitoring every 5 minutes...\n")
 
-    # results = save_zone_data_for_tickers(
-    #         tickers=tickers,
-    #         daily_limit=45,
-    #         weekly_limit=250,
-    #     )
+    while True:
+        try:
+            print(f"Running check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # print(json.dumps(results, indent=2))
-    clear_zone_data()
+            monitor_tickers_and_alert(
+                tickers=tickers,
+                max_workers=len(tickers),
+            )
+
+        except Exception as e:
+            print("Error in main loop:", e)
+
+        # wait 5 minutes (300 seconds)
+        time.sleep(300)
