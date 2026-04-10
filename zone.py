@@ -39,16 +39,15 @@ def get_daily_ohlc_3m(ticker: str, limit: int = 90) -> list[dict]:
     return result
 
 
-def detect_zones_from_daily(candles: list[dict], tolerance_pct: float = 0.002, min_touches: int = 3):
-    """
-    Detect support/resistance zones from daily candles.
-
-    - Resistance: high wicks
-    - Support: low wicks
-    - Merge levels within tolerance
-    - Keep zones with >= min_touches
-    """
-
+def detect_zones_from_daily(
+    candles: list[dict],
+    tolerance_pct: float = 0.002,
+    min_touches: int = 2,
+    overlap_min_touches: int = 2,
+    pivot_left: int = 3,
+    pivot_right: int = 3,
+    top_pick: int = 4
+):
     highs = [{"price": c["high"], "type": "resistance"} for c in candles]
     lows = [{"price": c["low"], "type": "support"} for c in candles]
 
@@ -59,7 +58,6 @@ def detect_zones_from_daily(candles: list[dict], tolerance_pct: float = 0.002, m
             placed = False
 
             for c in clusters:
-                # use average price of cluster (no mid stored)
                 avg_price = sum(c["prices"]) / len(c["prices"])
 
                 if abs(lvl["price"] - avg_price) / avg_price <= tolerance_pct:
@@ -87,14 +85,189 @@ def detect_zones_from_daily(candles: list[dict], tolerance_pct: float = 0.002, m
 
         return zones
 
+    def build_support_resust_zones():
+        swing_high_wicks = []
+        swing_low_wicks = []
+
+        for i in range(pivot_left, len(candles) - pivot_right):
+            current = candles[i]
+            current_high = current["high"]
+            current_low = current["low"]
+
+            is_swing_high = all(
+                current_high > candles[j]["high"]
+                for j in range(i - pivot_left, i + pivot_right + 1)
+                if j != i
+            )
+
+            is_swing_low = all(
+                current_low < candles[j]["low"]
+                for j in range(i - pivot_left, i + pivot_right + 1)
+                if j != i
+            )
+
+            if is_swing_high:
+                body_top = max(current["open"], current["close"])
+                wick_low = body_top
+                wick_high = current["high"]
+
+                if wick_high > wick_low:
+                    swing_high_wicks.append({
+                        "low": float(wick_low),
+                        "high": float(wick_high),
+                        "date": current["date"]
+                    })
+
+            if is_swing_low:
+                body_bottom = min(current["open"], current["close"])
+                wick_low = current["low"]
+                wick_high = body_bottom
+
+                if wick_high > wick_low:
+                    swing_low_wicks.append({
+                        "low": float(wick_low),
+                        "high": float(wick_high),
+                        "date": current["date"]
+                    })
+
+        overlap_levels = []
+
+        for high_wick in swing_high_wicks:
+            for low_wick in swing_low_wicks:
+                overlap_low = max(high_wick["low"], low_wick["low"])
+                overlap_high = min(high_wick["high"], low_wick["high"])
+
+                if overlap_low <= overlap_high:
+                    overlap_levels.append({
+                        "price": (overlap_low + overlap_high) / 2,
+                        "range_low": overlap_low,
+                        "range_high": overlap_high,
+                        "type": "support&resust"
+                    })
+
+        clusters = []
+
+        for lvl in sorted(overlap_levels, key=lambda x: x["price"]):
+            placed = False
+
+            for c in clusters:
+                avg_price = sum(c["prices"]) / len(c["prices"])
+
+                if abs(lvl["price"] - avg_price) / avg_price <= tolerance_pct:
+                    c["prices"].append(lvl["price"])
+                    c["range_lows"].append(lvl["range_low"])
+                    c["range_highs"].append(lvl["range_high"])
+                    c["touches"] += 1
+                    placed = True
+                    break
+
+            if not placed:
+                clusters.append({
+                    "type": "support&resust",
+                    "prices": [lvl["price"]],
+                    "range_lows": [lvl["range_low"]],
+                    "range_highs": [lvl["range_high"]],
+                    "touches": 1
+                })
+
+        zones = []
+        for c in clusters:
+            if c["touches"] >= overlap_min_touches:
+                zones.append({
+                    "type": c["type"],
+                    "low": round(min(c["range_lows"]), 2),
+                    "high": round(max(c["range_highs"]), 2),
+                    "touches": c["touches"]
+                })
+
+        return zones
+
     resistance = cluster(highs)
     support = cluster(lows)
+    _support_resust = build_support_resust_zones()  # calculated but excluded
 
-    return support + resistance
+    normal_zones = support + resistance
 
+    # keep only top_pick non-overlap zones by touches
+    normal_zones = sorted(
+        normal_zones,
+        key=lambda z: (z["touches"], -(z["high"] - z["low"])),
+        reverse=True
+    )[:top_pick]
 
+    return normal_zones
 
+def convert_daily_to_weekly(daily_candles: list[dict]) -> list[dict]:
+    """
+    Convert daily OHLCV candles into weekly OHLCV candles.
+    Assumes daily_candles are sorted oldest -> newest.
+    """
 
+    weekly = []
+    current_week = None
+
+    for candle in daily_candles:
+        dt = datetime.strptime(candle["date"], "%Y-%m-%d")
+        year, week_num, _ = dt.isocalendar()
+        week_key = (year, week_num)
+
+        if current_week is None or current_week["week_key"] != week_key:
+            if current_week is not None:
+                weekly.append({
+                    "date": current_week["date"],
+                    "open": current_week["open"],
+                    "high": current_week["high"],
+                    "low": current_week["low"],
+                    "close": current_week["close"],
+                    "volume": current_week["volume"]
+                })
+
+            current_week = {
+                "week_key": week_key,
+                "date": candle["date"],
+                "open": candle["open"],
+                "high": candle["high"],
+                "low": candle["low"],
+                "close": candle["close"],
+                "volume": candle["volume"]
+            }
+        else:
+            current_week["high"] = max(current_week["high"], candle["high"])
+            current_week["low"] = min(current_week["low"], candle["low"])
+            current_week["close"] = candle["close"]
+            current_week["volume"] += candle["volume"]
+
+    if current_week is not None:
+        weekly.append({
+            "date": current_week["date"],
+            "open": current_week["open"],
+            "high": current_week["high"],
+            "low": current_week["low"],
+            "close": current_week["close"],
+            "volume": current_week["volume"]
+        })
+
+    return weekly
+def detect_zones_from_weekly(
+    candles: list[dict],
+    tolerance_pct: float = 0.002,
+    min_touches: int = 3,
+    overlap_min_touches: int = 2,
+    pivot_left: int = 3,
+    pivot_right: int = 3
+):
+    """
+    Same logic as detect_zones_from_daily(), but for weekly candles.
+    """
+
+    return detect_zones_from_daily(
+        candles=candles,
+        tolerance_pct=tolerance_pct,
+        min_touches=min_touches,
+        overlap_min_touches=overlap_min_touches,
+        pivot_left=pivot_left,
+        pivot_right=pivot_right
+    )
 def get_live_price_full(ticker: str) -> float:
     """
     Get best available price (regular + aftermarket)
@@ -133,14 +306,22 @@ def get_live_price_full(ticker: str) -> float:
 
 
 
-data = get_daily_ohlc_3m("AMD", limit=90)
+if __name__ == "__main__":
+    data = get_daily_ohlc_3m("tsla", limit=20)
+    zones = detect_zones_from_daily(data)
 
-zones = detect_zones_from_daily(data)
+    for z in zones:
+        print(z)
 
-for z in zones:
-    print(z)
+    daily_data = get_daily_ohlc_3m("AMD", limit=90)
+    weekly_data = convert_daily_to_weekly(daily_data)
 
-# price = get_live_price_full("AAPL")
-# print(price)
+    weekly_zones = detect_zones_from_weekly(
+        weekly_data,
+        tolerance_pct=0.0075,
+        min_touches=2,
+        overlap_min_touches=2
+    )
 
-
+    # for z in weekly_zones:
+    #     print(z)
