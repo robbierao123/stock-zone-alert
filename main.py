@@ -21,8 +21,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-DAILY_LIMIT = int(os.getenv("DAILY_LIMIT"))
-WEEKLY_LIMIT = int(os.getenv("WEEKLY_LIMIT"))
+DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", 45))
+WEEKLY_LIMIT = int(os.getenv("WEEKLY_LIMIT", 250))
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -296,7 +296,7 @@ if __name__ == "__main__":
         daily_limit= DAILY_LIMIT,
         weekly_limit=WEEKLY_LIMIT,
     )
-
+    print(f"DAILY_LIMIT={DAILY_LIMIT}, WEEKLY_LIMIT={WEEKLY_LIMIT}")
     print("Start monitoring every 5 minutes...\n")
 
     while True:
