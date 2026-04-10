@@ -1,0 +1,33 @@
+{
+  "ticker": "SPY",
+  "timeframe": "weekly",
+  "source_daily_lookback": 250,
+  "weekly_candle_count": 53,
+  "zone_count": 4,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 678.47,
+      "high": 691.13,
+      "touches": 14
+    },
+    {
+      "type": "support",
+      "low": 675.78,
+      "high": 680.59,
+      "touches": 10
+    },
+    {
+      "type": "resistance",
+      "low": 691.66,
+      "high": 697.84,
+      "touches": 7
+    },
+    {
+      "type": "support",
+      "low": 661.21,
+      "high": 663.3,
+      "touches": 6
+    }
+  ]
+}

@@ -305,23 +305,49 @@ def get_live_price_full(ticker: str) -> float:
 
 
 
+def get_latest_closed_5m_price(ticker: str) -> float:
+    """
+    Return the latest closed 5-minute candle close price for a ticker.
+    """
+
+    url = "https://financialmodelingprep.com/stable/historical-chart/5min"
+    params = {
+        "symbol": ticker,
+        "apikey": API_KEY
+    }
+
+    r = requests.get(url, params=params, timeout=20)
+    r.raise_for_status()
+    data = r.json()
+
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"No 5-minute data returned for {ticker}: {data}")
+
+    latest_bar = data[0]
+
+    if "close" not in latest_bar:
+        raise ValueError(f"Missing close price in latest 5-minute bar for {ticker}: {latest_bar}")
+
+    return float(latest_bar["close"])
+
+
 
 if __name__ == "__main__":
-    data = get_daily_ohlc_3m("tsla", limit=20)
-    zones = detect_zones_from_daily(data)
 
-    for z in zones:
-        print(z)
+    price = get_latest_closed_5m_price("googl")
+    print(price)
+    # data = get_daily_ohlc_3m("tsla", limit=20)
+    # zones = detect_zones_from_daily(data)
 
-    daily_data = get_daily_ohlc_3m("AMD", limit=90)
-    weekly_data = convert_daily_to_weekly(daily_data)
-
-    weekly_zones = detect_zones_from_weekly(
-        weekly_data,
-        tolerance_pct=0.0075,
-        min_touches=2,
-        overlap_min_touches=2
-    )
-
-    # for z in weekly_zones:
+    # for z in zones:
     #     print(z)
+
+    # daily_data = get_daily_ohlc_3m("AMD", limit=90)
+    # weekly_data = convert_daily_to_weekly(daily_data)
+
+    # weekly_zones = detect_zones_from_weekly(
+    #     weekly_data,
+    #     tolerance_pct=0.0075,
+    #     min_touches=2,
+    #     overlap_min_touches=2
+    # )
