@@ -148,23 +148,55 @@ def save_zone_data_for_tickers(
 
     return results
 
+from pathlib import Path
 
+
+def clear_zone_data(
+    daily_folder: str = "daily-zone-data",
+    weekly_folder: str = "weekly-zone-data"
+) -> None:
+    """
+    Delete all files inside daily and weekly zone data folders.
+    Keeps the folders themselves.
+    """
+
+    for folder_name in [daily_folder, weekly_folder]:
+        folder = Path(folder_name)
+
+        if not folder.exists():
+            print(f"{folder_name} does not exist, skipping...")
+            continue
+
+        for file in folder.iterdir():
+            try:
+                if file.is_file():
+                    file.unlink()
+                elif file.is_dir():
+                    # optional: delete subfolders too
+                    import shutil
+                    shutil.rmtree(file)
+
+            except Exception as e:
+                print(f"Failed to delete {file}: {e}")
+
+        print(f"Cleared folder: {folder_name}")
 
 
 
 if __name__ == "__main__":
-    # ticker = "TSLA"
+    # ticker = "qqq"
     # run_for_ticker(ticker, daily_limit=45, weekly_limit=250)
-    
+
     # price = get_latest_closed_5m_price("tsla")
     # print(price)
 
-    tickers = ["spy", "qqq", "tsla", "mu"]
+    # tickers = ["spy", "qqq", "tsla", "mu"]
 
-    results = save_zone_data_for_tickers(
-            tickers=tickers,
-            daily_limit=45,
-            weekly_limit=250,
-        )
+    # results = save_zone_data_for_tickers(
+    #         tickers=tickers,
+    #         daily_limit=45,
+    #         weekly_limit=250,
+    #     )
 
-    print(json.dumps(results, indent=2))
+    # print(json.dumps(results, indent=2))
+    clear_zone_data()
