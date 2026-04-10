@@ -1,7 +1,8 @@
 import pandas as pd
+import os
 import mplfinance as mpf
 from pathlib import Path
-
+from dotenv import load_dotenv
 from zone import (
     get_daily_ohlc_3m,
     detect_zones_from_daily,

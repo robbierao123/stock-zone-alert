@@ -1,8 +1,9 @@
 import requests
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
-
-WEBHOOK_URL = "https://discord.com/api/webhooks/1492249935138000980/ONYf6LLN_u_p449fEdTJ0X56G-OnFjr8AhD-zSb0VTBgxw3EaXIF8KKRIw5kV7GK7MHD"
+WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 
 def send_message(message: str) -> None:

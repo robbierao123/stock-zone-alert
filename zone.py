@@ -1,12 +1,12 @@
 import requests
 from datetime import datetime, timedelta
-
+import os
 
 
 
 import requests
 
-API_KEY = "1i7Eb4jjz6vJmKKxO1s4iUytVA6KDI3V"
+API_KEY = os.getenv("FMP_API_KEY")
 
 def get_daily_ohlc_3m(ticker: str, limit: int = 90) -> list[dict]:
     url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
