@@ -1,5 +1,6 @@
 import pandas as pd
 import mplfinance as mpf
+from pathlib import Path
 
 from zone import (
     get_daily_ohlc_3m,
@@ -11,15 +12,20 @@ from zone import (
 
 def _get_zone_color(zone_type: str) -> str:
     if zone_type == "resistance":
-        return "#e57373"   # softer red but visible
+        return "#e57373"
     if zone_type == "support":
-        return "#81c784"   # soft green but visible
+        return "#81c784"
     if zone_type in ["support&resust", "support&resistance"]:
-        return "#ffb74d"   # orange highlight
+        return "#ffb74d"
     return "blue"
 
 
-def _draw_chart_from_candles(candles: list[dict], zones: list[dict], title: str, save_path: str | None = None):
+def _draw_chart_from_candles(
+    candles: list[dict],
+    zones: list[dict],
+    title: str,
+    save_path: str | None = None
+):
     df = pd.DataFrame(candles)
     df["date"] = pd.to_datetime(df["date"])
     df.set_index("date", inplace=True)
@@ -28,19 +34,18 @@ def _draw_chart_from_candles(candles: list[dict], zones: list[dict], title: str,
     for z in zones:
         zone_type = z["type"]
 
-        # 🔥 stronger colors (not pastel)
         if zone_type == "resistance":
-            color = "#e74c3c"   # strong red
-            alpha = 0.25
+            color = "#e74c3c"
+            alpha = 0.20
         elif zone_type == "support":
-            color = "#2ecc71"   # strong green
-            alpha = 0.25
+            color = "#2ecc71"
+            alpha = 0.20
         elif zone_type in ["support&resust", "support&resistance"]:
-            color = "#f39c12"   # orange = important overlap
-            alpha = 0.30
+            color = "#f39c12"
+            alpha = 0.24
         else:
             color = "#95a5a6"
-            alpha = 0.20
+            alpha = 0.18
 
         fill_between.append(
             dict(
@@ -50,10 +55,10 @@ def _draw_chart_from_candles(candles: list[dict], zones: list[dict], title: str,
                 alpha=alpha
             )
         )
-    # softer colors (closer to Yahoo)
+
     mc = mpf.make_marketcolors(
-        up="#26a69a",        # soft teal green
-        down="#ef5350",      # soft red
+        up="#26a69a",
+        down="#ef5350",
         edge="inherit",
         wick="inherit",
         volume="inherit"
@@ -61,7 +66,7 @@ def _draw_chart_from_candles(candles: list[dict], zones: list[dict], title: str,
 
     s = mpf.make_mpf_style(
         marketcolors=mc,
-        gridstyle="",        # no grid
+        gridstyle="",
         facecolor="white",
         figcolor="white",
         edgecolor="white",
@@ -90,7 +95,11 @@ def _draw_chart_from_candles(candles: list[dict], zones: list[dict], title: str,
     mpf.plot(df, **kwargs)
 
 
-def draw_daily_zones_chart(ticker: str, limit: int = 90, save_path: str | None = None):
+def draw_daily_zones_chart(
+    ticker: str,
+    limit: int = 90,
+    save_path: str | None = None
+):
     daily_candles = get_daily_ohlc_3m(ticker, limit=limit)
     daily_zones = detect_zones_from_daily(daily_candles)
 
@@ -102,7 +111,11 @@ def draw_daily_zones_chart(ticker: str, limit: int = 90, save_path: str | None =
     )
 
 
-def draw_weekly_zones_chart(ticker: str, limit: int = 250, save_path: str | None = None):
+def draw_weekly_zones_chart(
+    ticker: str,
+    limit: int = 250,
+    save_path: str | None = None
+):
     daily_candles = get_daily_ohlc_3m(ticker, limit=limit)
     weekly_candles = convert_daily_to_weekly(daily_candles)
 
@@ -121,11 +134,43 @@ def draw_weekly_zones_chart(ticker: str, limit: int = 250, save_path: str | None
     )
 
 
+def _get_chart_folder() -> Path:
+    chart_dir = Path("chart")
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    return chart_dir
+
+
+def save_daily_zones_chart(ticker: str, limit: int = 90) -> str:
+    chart_dir = _get_chart_folder()
+    save_path = chart_dir / f"{ticker.lower()}_daily.png"
+
+    draw_daily_zones_chart(
+        ticker=ticker,
+        limit=limit,
+        save_path=str(save_path)
+    )
+
+    return str(save_path)
+
+
+def save_weekly_zones_chart(ticker: str, limit: int = 250) -> str:
+    chart_dir = _get_chart_folder()
+    save_path = chart_dir / f"{ticker.lower()}_weekly.png"
+
+    draw_weekly_zones_chart(
+        ticker=ticker,
+        limit=limit,
+        save_path=str(save_path)
+    )
+
+    return str(save_path)
+
+
 if __name__ == "__main__":
-    ticker = "uso"
+    ticker = "spy"
 
-    # Daily chart
-    draw_daily_zones_chart(ticker, limit=45)
+    daily_path = save_daily_zones_chart(ticker, limit=45)
+    print("Saved daily chart:", daily_path)
 
-    # Weekly chart
-    draw_weekly_zones_chart(ticker, limit=250)
+    weekly_path = save_weekly_zones_chart(ticker, limit=250)
+    print("Saved weekly chart:", weekly_path)
