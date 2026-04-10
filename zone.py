@@ -91,10 +91,7 @@ def detect_zones_from_daily(candles: list[dict], tolerance_pct: float = 0.002, m
     support = cluster(lows)
 
     return support + resistance
-    resistance_zones = cluster(highs)
-    support_zones = cluster(lows)
 
-    return support_zones + resistance_zones
 
 
 
@@ -136,14 +133,14 @@ def get_live_price_full(ticker: str) -> float:
 
 
 
-# data = get_daily_ohlc_3m("AMD", limit=90)
+data = get_daily_ohlc_3m("AMD", limit=90)
 
-# zones = detect_zones_from_daily(data)
+zones = detect_zones_from_daily(data)
 
-# for z in zones:
-#     print(z)
+for z in zones:
+    print(z)
 
-price = get_live_price_full("AAPL")
-print(price)
+# price = get_live_price_full("AAPL")
+# print(price)
 
 
