@@ -287,7 +287,11 @@ def monitor_tickers_and_alert(
 
 
 if __name__ == "__main__":
-    tickers = ["spy", "qqq", "tsla", "mu"]
+    tickers = [ "tsla", "mu",
+     "aapl", "amzn", "amd", "avgo", "asml",
+    "googl", "intc", "meta", "msft", "nvda",
+    "orcl", "pltr", "rddt", "sndk", "stx","intc"
+    ,"nflx","mstr","hood","coin","pltr"]
 
     # run once at start (build zone JSON)
     print("Generating zone data...")
