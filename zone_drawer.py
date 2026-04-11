@@ -168,10 +168,19 @@ def save_weekly_zones_chart(ticker: str, limit: int = 250) -> str:
 
 
 if __name__ == "__main__":
-    ticker = "spy"
+    tickers = [ "tsla", "mu",
+     "aapl", "amzn", "amd", "avgo", "asml",
+    "googl", "intc", "meta", "msft", "nvda",
+    "orcl", "pltr", "rddt", "sndk", "stx","intc"
+    ,"nflx","mstr","hood","coin","pltr"]
 
-    daily_path = save_daily_zones_chart(ticker, limit=45)
-    print("Saved daily chart:", daily_path)
+    for ticker in tickers:
+        try:
+            daily_path = save_daily_zones_chart(ticker, limit=45)
+            print(f"Saved daily chart: {daily_path}")
 
-    weekly_path = save_weekly_zones_chart(ticker, limit=250)
-    print("Saved weekly chart:", weekly_path)
+            weekly_path = save_weekly_zones_chart(ticker, limit=250)
+            print(f"Saved weekly chart: {weekly_path}")
+
+        except Exception as e:
+            print(f"Error drawing charts for {ticker.upper()}: {e}")
