@@ -84,7 +84,7 @@ def detect_zones_from_daily(
 
         return zones
 
-    def build_support_resust_zones():
+    def build_support_resist_zones():
         swing_high_wicks = []
         swing_low_wicks = []
 
@@ -183,7 +183,7 @@ def detect_zones_from_daily(
 
     resistance = cluster(highs)
     support = cluster(lows)
-    _support_resust = build_support_resust_zones()  # calculated but excluded
+    _support_resist = build_support_resist_zones()  # calculated but excluded
 
     normal_zones = support + resistance
 
