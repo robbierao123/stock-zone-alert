@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.getenv("FMP_API_KEY")
-
+TOP_PICK = int(os.getenv("TOP_PICK", 5))
 def get_daily_ohlc_3m(ticker: str, limit: int = 90) -> list[dict]:
     url = "https://financialmodelingprep.com/stable/historical-price-eod/full"
     params = {
@@ -45,7 +45,7 @@ def detect_zones_from_daily(
     overlap_min_touches: int = 2,
     pivot_left: int = 3,
     pivot_right: int = 3,
-    top_pick: int = 4
+    top_pick: int = TOP_PICK
 ):
     highs = [{"price": c["high"], "type": "resistance"} for c in candles]
     lows = [{"price": c["low"], "type": "support"} for c in candles]
