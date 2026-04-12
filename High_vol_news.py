@@ -1,24 +1,198 @@
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 import requests
 from dotenv import load_dotenv
-load_dotenv()
 
+load_dotenv()
 API_KEY = os.getenv("FMP_API_KEY")
+
+
+def _is_noise_article(title: str, site: str) -> bool:
+    """
+    Return True if the article looks like low-value / noisy content.
+    """
+    t = (title or "").lower().strip()
+    s = (site or "").lower().strip()
+
+    noise_sites = {
+        "youtube.com",
+    }
+
+    if s in noise_sites:
+        return True
+
+    noise_patterns = [
+        r"\btop\s+\d+\b",                     # Top 3, Top 5, etc.
+        r"\bbest\b.*\bstock",                # best stock / best AI stock
+        r"\bshould you buy\b",
+        r"\breason to buy\b",
+        r"\bstocks to buy\b",
+        r"\bai stocks to hold\b",
+        r"\bi love\b",
+        r"\bi don't like\b",
+        r"\bprediction:\b",
+        r"\bhonest report card\b",
+        r"\btrade strategy\b",
+        r"\bforecasts?\b",
+        r"\bworth the wait\b",
+        r"\beveryone'?s wrong\b",
+        r"\bgoes higher\b",
+        r"\bmag 7\b",
+        r"\bappleverse\b",
+        r"\bperfect companies underperform\b",
+        r"\bcash-generating machines\b",
+        r"\bdividend yields\b",
+        r"\bdcf analysis\b",
+        r"\bintrinsic value\b",
+        r"\bchallenging environment for malls\b",
+        r"\bfoldable iphone\b",              # remove foldable speculation
+        r"\bfoldable phone\b",
+        r"\bhinge cringe\b",
+        r"\bdelay concerns\b",
+        r"\btimeline holds\b",
+        r"\bflop or strategic stop\b",
+        r"\boptions trade\b",
+        r"\bapril fools\b",
+    ]
+
+    return any(re.search(pattern, t) for pattern in noise_patterns)
+
+
+def _article_score(title: str, site: str) -> int:
+    """
+    Higher score = more valuable.
+    """
+    t = (title or "").lower().strip()
+    s = (site or "").lower().strip()
+
+    score = 0
+
+    # Source weighting
+    high_value_sites = {
+        "reuters.com": 5,
+        "cnbc.com": 4,
+        "businesswire.com": 4,
+        "techcrunch.com": 3,
+        "seekingalpha.com": 2,
+        "benzinga.com": 2,
+        "feeds.benzinga.com": 2,
+        "gurufocus.com": 2,
+        "fastcompany.com": 2,
+        "proactiveinvestors.com": 2,
+        "barrons.com": 3,
+        "investopedia.com": 2,
+    }
+    score += high_value_sites.get(s, 0)
+
+    # High-value themes
+    strong_patterns = [
+        r"\bearnings\b",
+        r"\bmiss\b",
+        r"\bbeat\b",
+        r"\bguidance\b",
+        r"\bsales\b",
+        r"\bshipments\b",
+        r"\bstore closure\b",
+        r"\bclosing stores\b",
+        r"\bshutter\b",
+        r"\bunionized\b",
+        r"\bunion busting\b",
+        r"\bsmartphone shipments\b",
+        r"\bleads global smartphone shipments\b",
+        r"\bmemory costs\b",
+        r"\bweaker iphone sales\b",
+        r"\bbullish call\b",
+        r"\binsider trading\b",
+        r"\bposition\b",
+        r"\bpurchased\b",
+        r"\bbuys\b",
+        r"\bincreases position\b",
+        r"\breduces position\b",
+        r"\bstake\b",
+        r"\bfines\b",
+        r"\badministration\b",
+        r"\beu\b.*\bbig tech\b",
+    ]
+    for pattern in strong_patterns:
+        if re.search(pattern, t):
+            score += 3
+
+    # Medium-value themes
+    medium_patterns = [
+        r"\bai\b",
+        r"\binfrastructure\b",
+        r"\blocal ai\b",
+        r"\bcybersecurity\b",
+        r"\banthropic\b",
+        r"\bwedbush\b",
+    ]
+    for pattern in medium_patterns:
+        if re.search(pattern, t):
+            score += 1
+
+    return score
+
+
+def _filter_and_rank_news(
+    news_items: List[Dict[str, Any]],
+    top_valuable_news: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    Remove noisy articles, rank remaining by score, and keep top N.
+    """
+    kept = []
+    seen_titles = set()
+
+    for item in news_items:
+        title = (item.get("title") or "").strip()
+        site = (item.get("site") or "").strip()
+
+        if not title:
+            continue
+
+        normalized_title = re.sub(r"\s+", " ", title.lower())
+        if normalized_title in seen_titles:
+            continue
+        seen_titles.add(normalized_title)
+
+        if _is_noise_article(title, site):
+            continue
+
+        score = _article_score(title, site)
+        if score <= 0:
+            continue
+
+        enriched = dict(item)
+        enriched["_score"] = score
+        kept.append(enriched)
+
+    kept.sort(
+        key=lambda x: (
+            x.get("_score", 0),
+            x.get("publishedDate") or "",
+        ),
+        reverse=True,
+    )
+
+    return kept[:top_valuable_news]
+
 
 def news_pdf_on_top_volume_days(
     ticker: str,
     days: int,
     top: int,
     api_key: str,
-    news_limit_per_day: int = 10,
+    news_limit_per_day: int = 50,
+    top_valuable_news: int = 10,
 ) -> List[Dict[str, Any]]:
     """
     Get news for the top highest-volume trading days in the last `days`,
     compute relative volume vs the fixed average daily volume over that same
-    lookback window, and save the result as a PDF under NEWS/.
+    lookback window, filter out noisy articles, keep only valuable news,
+    and save the result as a PDF under NEWS/.
 
     Args:
         ticker: Stock ticker, e.g. "AMZN"
@@ -26,6 +200,7 @@ def news_pdf_on_top_volume_days(
         top: Number of highest-volume trading days to include
         api_key: FMP API key
         news_limit_per_day: Max news items to fetch per selected day
+        top_valuable_news: Max valuable news items to keep per day
 
     Returns:
         A list of dicts sorted by date descending (recent -> older).
@@ -34,6 +209,8 @@ def news_pdf_on_top_volume_days(
         raise ValueError("days must be > 0")
     if top <= 0:
         raise ValueError("top must be > 0")
+    if top_valuable_news <= 0:
+        raise ValueError("top_valuable_news must be > 0")
     if not api_key:
         raise ValueError("api_key is required")
 
@@ -95,15 +272,11 @@ def news_pdf_on_top_volume_days(
     if not rows:
         raise ValueError(f"No usable price rows found for {ticker}")
 
-    # Only keep rows in requested window
     candidate_days = [r for r in rows if start_date <= r["date_obj"] <= end_date]
     if not candidate_days:
         raise ValueError(f"No trading days found for {ticker} in the last {days} days")
 
-    # Fixed average volume across the whole lookback window
     fixed_avg_volume = sum(r["volume"] for r in candidate_days) / len(candidate_days)
-
-    # Top volume days by biggest volume
     top_volume_days = sorted(candidate_days, key=lambda x: x["volume"], reverse=True)[:top]
 
     news_url = "https://financialmodelingprep.com/stable/news/stock"
@@ -128,6 +301,19 @@ def news_pdf_on_top_volume_days(
         if not isinstance(news_data, list):
             news_data = []
 
+        filtered_news = _filter_and_rank_news(
+            news_items=[
+                {
+                    "publishedDate": item.get("publishedDate"),
+                    "title": item.get("title"),
+                    "site": item.get("site"),
+                    "url": item.get("url"),
+                }
+                for item in news_data
+            ],
+            top_valuable_news=top_valuable_news,
+        )
+
         rel_volume = (day_row["volume"] / fixed_avg_volume) if fixed_avg_volume > 0 else None
 
         results.append(
@@ -144,20 +330,11 @@ def news_pdf_on_top_volume_days(
                 "low": day_row["low"],
                 "close": day_row["close"],
                 "color": day_row["color"],
-                "news_count": len(news_data),
-                "news": [
-                    {
-                        "publishedDate": item.get("publishedDate"),
-                        "title": item.get("title"),
-                        "site": item.get("site"),
-                        "url": item.get("url"),
-                    }
-                    for item in news_data
-                ],
+                "news_count": len(filtered_news),
+                "news": filtered_news,
             }
         )
 
-    # Sort recent -> older for output and PDF
     results.sort(key=lambda x: x["date_obj"], reverse=True)
 
     title = f"{ticker}_top{top}_days_monthly_news"
@@ -254,7 +431,8 @@ def _render_news_results_to_pdf(results: List[Dict[str, Any]], title: str, pdf_p
             f"Volume: {item['volume']:,}    "
             f"AvgVol: {int(item['avg_volume']):,}    "
             f"RelVol: {item['rel_volume_text']}    "
-            f"Color: {item['color'].upper()}"
+            f"Color: {item['color'].upper()}    "
+            f"ValuableNews: {item['news_count']}"
         )
         c.setFont(meta_font, meta_size)
         c.drawString(left_margin, y, meta_line)
@@ -264,7 +442,7 @@ def _render_news_results_to_pdf(results: List[Dict[str, Any]], title: str, pdf_p
         if not news_items:
             y = ensure_space(y, 20)
             c.setFont(body_font, body_size)
-            c.drawString(left_margin + 10, y, "No news found.")
+            c.drawString(left_margin + 10, y, "No valuable news found.")
             y -= section_spacing
             continue
 
@@ -274,10 +452,8 @@ def _render_news_results_to_pdf(results: List[Dict[str, Any]], title: str, pdf_p
             published = (article.get("publishedDate") or "")[:16]
 
             line = f"{news_idx}. {headline}"
-
             if published:
                 line += f" ({published})"
-
             line += f" [{site}]"
 
             y = ensure_space(y, 32)
@@ -296,20 +472,6 @@ def _render_news_results_to_pdf(results: List[Dict[str, Any]], title: str, pdf_p
     c.save()
 
 
-
-# if __name__ == "__main__":
-
-
-#     results = news_pdf_on_top_volume_days(
-#         ticker="AMZN",
-#         days=30,
-#         top=5,
-#         api_key=API_KEY,
-#         news_limit_per_day=20,
-#         avg_volume_lookback=20,
-#     )
-
-    
 if __name__ == "__main__":
     try:
         print("STARTING...")
@@ -317,7 +479,9 @@ if __name__ == "__main__":
             ticker="AAPL",
             days=30,
             top=5,
-            api_key=API_KEY
+            api_key=API_KEY,
+            news_limit_per_day=50,
+            top_valuable_news=10,
         )
         print("DONE")
     except Exception as e:
