@@ -432,7 +432,6 @@ def _render_news_results_to_pdf(results: List[Dict[str, Any]], title: str, pdf_p
             f"AvgVol: {int(item['avg_volume']):,}    "
             f"RelVol: {item['rel_volume_text']}    "
             f"Color: {item['color'].upper()}    "
-            f"ValuableNews: {item['news_count']}"
         )
         c.setFont(meta_font, meta_size)
         c.drawString(left_margin, y, meta_line)
@@ -476,7 +475,7 @@ if __name__ == "__main__":
     try:
         print("STARTING...")
         results = news_pdf_on_top_volume_days(
-            ticker="AAPL",
+            ticker="TSLA",
             days=30,
             top=5,
             api_key=API_KEY,
