@@ -333,7 +333,7 @@ def get_latest_closed_5m_price(ticker: str) -> float:
 
 if __name__ == "__main__":
 
-    price = get_latest_closed_5m_price("googl")
+    price = get_latest_closed_5m_price("meta")
     print(price)
     # data = get_daily_ohlc_3m("tsla", limit=20)
     # zones = detect_zones_from_daily(data)

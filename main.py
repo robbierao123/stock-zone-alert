@@ -223,7 +223,7 @@ def _send_zone_hit_alert(ticker: str, price: float, timeframe: str, zone: dict) 
 
     message = (
         f"{title}\n"
-        f"Time: {now_str}\n"
+        f"Time: {now_str.strftime('%Y-%m-%d %H:%M')}\n"
         f"Ticker: {ticker.upper()}\n"
         f"5m Closed Price: {price:.2f}\n"
         f"Zone Range: {zone['low']} - {zone['high']}\n"
@@ -291,7 +291,7 @@ if __name__ == "__main__":
      "aapl", "amzn", "amd", "avgo", "asml",
     "googl", "intc", "meta", "msft", "nvda",
     "orcl", "pltr", "rddt", "sndk", "stx","intc"
-    ,"nflx","mstr","hood","coin","pltr","baba"]
+    ,"nflx","mstr","hood","coin","pltr","baba","uso","xom","xle"]
 
     # run once at start (build zone JSON)
     print("Generating zone data...")
