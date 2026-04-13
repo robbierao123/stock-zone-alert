@@ -212,7 +212,7 @@ def _check_ticker_zones_worker(
 
 
 def _send_zone_hit_alert(ticker: str, price: float, timeframe: str, zone: dict) -> None:
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     if timeframe == "daily":
         image_path = save_daily_zones_chart(ticker, limit= DAILY_LIMIT)
@@ -223,7 +223,7 @@ def _send_zone_hit_alert(ticker: str, price: float, timeframe: str, zone: dict) 
 
     message = (
         f"{title}\n"
-        f"Time: {now_str.strftime('%Y-%m-%d %H:%M')}\n"
+        f"Time: {now_str}\n"
         f"Ticker: {ticker.upper()}\n"
         f"5m Closed Price: {price:.2f}\n"
         f"Zone Range: {zone['low']} - {zone['high']}\n"
