@@ -316,4 +316,4 @@ if __name__ == "__main__":
             print("Error in main loop:", e)
 
         # wait 5 minutes (300 seconds)
-        time.sleep(300)
+        time.sleep(200)
