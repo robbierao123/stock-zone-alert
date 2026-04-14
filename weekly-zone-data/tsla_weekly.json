@@ -1,39 +1,39 @@
 {
   "ticker": "TSLA",
   "timeframe": "weekly",
-  "source_daily_lookback": 250,
-  "weekly_candle_count": 53,
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 20,
   "zone_count": 5,
   "zones": [
-    {
-      "type": "resistance",
-      "low": 354.99,
-      "high": 357.54,
-      "touches": 6
-    },
-    {
-      "type": "resistance",
-      "low": 449.67,
-      "high": 454.3,
-      "touches": 5
-    },
-    {
-      "type": "support",
-      "low": 416.58,
-      "high": 419.08,
-      "touches": 4
-    },
-    {
-      "type": "support",
-      "low": 381.4,
-      "high": 385.39,
-      "touches": 4
-    },
     {
       "type": "support",
       "low": 434.22,
       "high": 435.3,
       "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 416.38,
+      "high": 416.9,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 457.55,
+      "high": 458.87,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 452.43,
+      "high": 454.3,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 385.39,
+      "high": 387.53,
+      "touches": 2
     }
   ]
 }

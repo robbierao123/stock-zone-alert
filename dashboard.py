@@ -15,13 +15,14 @@ from zone import (
     detect_zones_from_weekly,
     convert_daily_to_weekly,
     get_latest_closed_5m_price,
+    get_live_price_full
 )
 
 load_dotenv()
 
 DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", 45))
 WEEKLY_LIMIT = int(os.getenv("WEEKLY_LIMIT", 250))
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL_ZONE")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL_DASHBOARD")
 DASHBOARD_STATE_FILE = os.getenv("DASHBOARD_STATE_FILE", "dashboard_state.json")
 
 
@@ -202,7 +203,7 @@ def _check_ticker_zones_worker(
     weekly_folder: str = "weekly-zone-data",
 ) -> dict:
     ticker_lc = ticker.lower()
-    price = get_latest_closed_5m_price(ticker_lc)
+    price = get_live_price_full(ticker_lc)
 
     daily_path = Path(daily_folder) / f"{ticker_lc}_daily.json"
     weekly_path = Path(weekly_folder) / f"{ticker_lc}_weekly.json"
