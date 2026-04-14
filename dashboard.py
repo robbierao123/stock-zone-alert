@@ -254,7 +254,7 @@ def _build_dashboard_content(results: list[dict]) -> str:
     lines = []
     lines.append("```")
     lines.append("LIVE ZONE HITS")
-    lines.append(f"Updated: {now_str}")
+    lines.append(f" Last Updated: {now_str}")
     lines.append("")
     lines.append("Ticker  Price      Daily                          Weekly")
     lines.append("------  ---------  -----------------------------  -----------------------------")
