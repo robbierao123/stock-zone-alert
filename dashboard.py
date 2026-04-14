@@ -342,5 +342,5 @@ if __name__ == "__main__":
         except Exception as e:
             print("Error in main loop:", e)
 
-        time.sleep(10)
+        time.sleep(30)
 
