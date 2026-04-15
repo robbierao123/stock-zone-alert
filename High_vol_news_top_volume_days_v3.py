@@ -1,6 +1,5 @@
 import os
 import re
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 import requests
@@ -212,18 +211,28 @@ def get_last_trading_days_by_volume(
         raise ValueError(f"No EOD data returned for {ticker}: {data}")
 
     recent_rows = data[:lookback_trading_days]
-    days = []
+    days: List[Dict[str, Any]] = []
     for row in recent_rows:
+        open_price = float(row.get("open") or 0)
+        close_price = float(row.get("close") or 0)
+        volume = float(row.get("volume") or 0)
         days.append(
             {
                 "date": row.get("date"),
-                "volume": float(row.get("volume") or 0),
-                "open": float(row.get("open") or 0),
+                "volume": volume,
+                "open": open_price,
                 "high": float(row.get("high") or 0),
                 "low": float(row.get("low") or 0),
-                "close": float(row.get("close") or 0),
+                "close": close_price,
+                "day_color": "GREEN" if close_price >= open_price else "RED",
             }
         )
+
+    avg_volume = sum(day["volume"] for day in days) / len(days)
+    for day in days:
+        day["avg_volume_30d"] = avg_volume
+        day["volume_multiple_vs_avg"] = day["volume"] / avg_volume if avg_volume > 0 else 0.0
+        day["volume_pct_vs_avg"] = ((day["volume"] - avg_volume) / avg_volume * 100.0) if avg_volume > 0 else 0.0
 
     top_days = sorted(days, key=lambda x: x["volume"], reverse=True)[:top_volume_days]
     top_days.sort(key=lambda x: x["date"], reverse=True)
@@ -279,16 +288,6 @@ def news_pdf_top_volume_days(
     news_limit: int = 250,
     top_valuable_news_per_day: int = 20,
 ) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    1) Look at the last `lookback_trading_days` trading days.
-    2) Pick the `top_volume_days` highest-volume days.
-    3) Fetch ticker news for each of those exact days.
-    4) Apply the existing filter/ranking logic to each day's news.
-    5) Save grouped results to a PDF.
-
-    Returns:
-        (grouped_results, pdf_path)
-    """
     if not ticker:
         raise ValueError("ticker is required")
     if not api_key:
@@ -327,6 +326,10 @@ def news_pdf_top_volume_days(
                 "high": day["high"],
                 "low": day["low"],
                 "close": day["close"],
+                "day_color": day["day_color"],
+                "avg_volume_30d": day["avg_volume_30d"],
+                "volume_multiple_vs_avg": day["volume_multiple_vs_avg"],
+                "volume_pct_vs_avg": day["volume_pct_vs_avg"],
                 "raw_news_count": len(raw_news),
                 "filtered_news_count": len(filtered_news),
                 "news": filtered_news,
@@ -337,7 +340,7 @@ def news_pdf_top_volume_days(
     news_dir = os.path.join(base_dir, "NEWS")
     os.makedirs(news_dir, exist_ok=True)
 
-    title = f"{ticker}_top_volume_days_news"
+    title = f"{ticker}_top_volume_days_news_with_volume_context"
     pdf_path = os.path.join(news_dir, f"{title}.pdf")
 
     _render_top_volume_days_news_to_pdf(
@@ -362,11 +365,12 @@ def _render_top_volume_days_news_to_pdf(
     ticker: str,
     lookback_trading_days: int,
 ) -> None:
+    from reportlab.lib import colors
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.units import inch
     from reportlab.pdfgen import canvas
 
-    c = canvas.Canvas(pdf_path, pagesize=letter)
+    pdf = canvas.Canvas(pdf_path, pagesize=letter)
     page_width, page_height = letter
 
     left_margin = 0.6 * inch
@@ -374,11 +378,10 @@ def _render_top_volume_days_news_to_pdf(
     top_margin = 0.6 * inch
     bottom_margin = 0.6 * inch
     usable_width = page_width - left_margin - right_margin
-
     line_height = 13
 
     def new_page() -> float:
-        c.showPage()
+        pdf.showPage()
         return page_height - top_margin
 
     def ensure_space(y_pos: float, needed: float) -> float:
@@ -394,7 +397,9 @@ def _render_top_volume_days_news_to_pdf(
         font_size: int = 10,
         extra_gap_after: int = 0,
     ) -> float:
-        c.setFont(font_name, font_size)
+        pdf.setFont(font_name, font_size)
+        pdf.setFillColor(colors.black)
+
         words = (text or "").split()
         if not words:
             return y_pos - line_height - extra_gap_after
@@ -402,14 +407,14 @@ def _render_top_volume_days_news_to_pdf(
         line = words[0]
         for word in words[1:]:
             candidate = f"{line} {word}"
-            if c.stringWidth(candidate, font_name, font_size) <= usable_width:
+            if pdf.stringWidth(candidate, font_name, font_size) <= usable_width:
                 line = candidate
             else:
-                c.drawString(x, y_pos, line)
+                pdf.drawString(x, y_pos, line)
                 y_pos -= line_height
                 line = word
 
-        c.drawString(x, y_pos, line)
+        pdf.drawString(x, y_pos, line)
         y_pos -= line_height + extra_gap_after
         return y_pos
 
@@ -417,43 +422,66 @@ def _render_top_volume_days_news_to_pdf(
     total_filtered = sum(group["filtered_news_count"] for group in grouped_results)
 
     y = page_height - top_margin
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(left_margin, y, title)
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.setFillColor(colors.black)
+    pdf.drawString(left_margin, y, title)
     y -= 24
 
-    c.setFont("Helvetica", 10)
-    c.drawString(left_margin, y, f"Ticker: {ticker}")
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(left_margin, y, f"Ticker: {ticker}")
     y -= 14
-    c.drawString(left_margin, y, f"Lookback trading days: {lookback_trading_days}")
+    pdf.drawString(left_margin, y, f"Lookback trading days: {lookback_trading_days}")
     y -= 14
-    c.drawString(left_margin, y, f"Selected high-volume days: {len(grouped_results)}")
+    pdf.drawString(left_margin, y, f"Selected high-volume days: {len(grouped_results)}")
     y -= 14
-    c.drawString(left_margin, y, f"Total raw news fetched: {total_raw}    Total filtered kept: {total_filtered}")
+    pdf.drawString(left_margin, y, f"Total raw news fetched: {total_raw}    Total filtered kept: {total_filtered}")
     y -= 22
 
     if not grouped_results:
-        c.drawString(left_margin, y, "No volume days found.")
-        c.save()
+        pdf.drawString(left_margin, y, "No volume days found.")
+        pdf.save()
         return
 
     for group in grouped_results:
         y = ensure_space(y, 90)
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(
+
+        pdf.setFont("Helvetica-Bold", 12)
+        pdf.setFillColor(colors.black)
+        pdf.drawString(
             left_margin,
             y,
             f"Volume Rank #{group['rank']} - {group['date']} - Volume: {int(group['volume']):,}",
         )
         y -= 16
 
-        c.setFont("Helvetica", 10)
-        c.drawString(
+        base_text = (
+            f"OHLC: O {group['open']:.2f}   H {group['high']:.2f}   "
+            f"L {group['low']:.2f}   C {group['close']:.2f}   Day: "
+        )
+        pdf.setFont("Helvetica", 10)
+        pdf.setFillColor(colors.black)
+        pdf.drawString(left_margin, y, base_text)
+
+        x_offset = left_margin + pdf.stringWidth(base_text, "Helvetica", 10)
+        day_color = group["day_color"].upper()
+        pdf.setFont("Helvetica-Bold", 10)
+        if day_color == "RED":
+            pdf.setFillColor(colors.red)
+        else:
+            pdf.setFillColor(colors.green)
+        pdf.drawString(x_offset, y, day_color)
+
+        pdf.setFont("Helvetica", 10)
+        pdf.setFillColor(colors.black)
+        y -= 14
+
+        pdf.drawString(
             left_margin,
             y,
-            f"OHLC: O {group['open']:.2f}   H {group['high']:.2f}   L {group['low']:.2f}   C {group['close']:.2f}",
+            f"30D Avg Vol: {int(group['avg_volume_30d']):,}   Vs Avg: {group['volume_multiple_vs_avg']:.2f}x ({group['volume_pct_vs_avg']:+.1f}%)",
         )
         y -= 14
-        c.drawString(
+        pdf.drawString(
             left_margin,
             y,
             f"Raw news fetched: {group['raw_news_count']}   Filtered kept: {group['filtered_news_count']}",
@@ -521,7 +549,7 @@ def _render_top_volume_days_news_to_pdf(
 
         y -= 4
 
-    c.save()
+    pdf.save()
 
 
 if __name__ == "__main__":
@@ -533,7 +561,7 @@ if __name__ == "__main__":
             lookback_trading_days=30,
             top_volume_days=5,
             news_limit=250,
-            top_valuable_news_per_day=20,
+            top_valuable_news_per_day=5,
         )
         print(f"DONE: {pdf_file}")
     except Exception as e:
