@@ -1,9 +1,10 @@
 LIVE ZONE HITS
-                             Last Updated: 2026-04-15 12:35:22                              
+                             Last Updated: 2026-04-15 13:02:55                              
 
 Ticker  Price      Vol     Daily                         Weekly
 ------  ---------  ------  -----------------------------  -----------------------------
-AMD     255.53     0.80    BREAK HIGH 255.46              -                            
-GOOGL   334.96     0.57    BREAK HIGH 333.29              -                            
-META    675.53     0.16    -                              HIT resistance 671.0-676.1   
-ORCL    169.65     0.73    BREAK HIGH 169.4               -
+COIN    188.70     1.29    BREAK HIGH 187.14              -                            
+GOOGL   334.22     0.12    BREAK HIGH 333.29              -                            
+META    673.00     0.77    -                              HIT resistance 671.0-676.1   
+NFLX    106.57     0.75    BREAK HIGH 106.57              -                            
+NVDA    196.99     0.43    BREAK HIGH 196.51              -
