@@ -1,10 +1,22 @@
 {
   "ticker": "MU",
   "timeframe": "weekly",
-  "source_daily_lookback": 90,
-  "weekly_candle_count": 20,
+  "source_daily_lookback": 250,
+  "weekly_candle_count": 53,
   "zone_count": 5,
   "zones": [
+    {
+      "type": "support",
+      "low": 118.91,
+      "high": 119.81,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 124.16,
+      "high": 125.08,
+      "touches": 3
+    },
     {
       "type": "support",
       "low": 361.35,
@@ -12,27 +24,15 @@
       "touches": 3
     },
     {
-      "type": "resistance",
-      "low": 429.35,
-      "high": 430.57,
+      "type": "support",
+      "low": 192.4,
+      "high": 192.59,
       "touches": 2
     },
     {
       "type": "support",
-      "low": 366.06,
-      "high": 367.45,
-      "touches": 2
-    },
-    {
-      "type": "support",
-      "low": 221.69,
-      "high": 223.33,
-      "touches": 2
-    },
-    {
-      "type": "resistance",
-      "low": 442.43,
-      "high": 444.27,
+      "low": 91.95,
+      "high": 92.22,
       "touches": 2
     }
   ]

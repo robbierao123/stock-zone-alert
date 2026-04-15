@@ -557,7 +557,7 @@ if __name__ == "__main__":
     try:
         print("STARTING...")
         results, pdf_file = news_pdf_top_volume_days(
-            ticker="TSLA",
+            ticker="SNDK",
             api_key=API_KEY,
             lookback_trading_days=30,
             top_volume_days=5,

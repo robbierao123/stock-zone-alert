@@ -1,10 +1,10 @@
-
 import json
 import os
 import time
 from pathlib import Path
 from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
@@ -14,8 +14,7 @@ from zone import (
     detect_zones_from_daily,
     detect_zones_from_weekly,
     convert_daily_to_weekly,
-    get_latest_closed_5m_price,
-    get_live_price_full
+    get_live_price_full,
 )
 
 load_dotenv()
@@ -24,6 +23,10 @@ DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", 45))
 WEEKLY_LIMIT = int(os.getenv("WEEKLY_LIMIT", 250))
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL_DASHBOARD")
 DASHBOARD_STATE_FILE = os.getenv("DASHBOARD_STATE_FILE", "dashboard_state.json")
+DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
+FMP_API_KEY = os.getenv("FMP_API_KEY")
+CHECK_INTERVAL_SECONDS = int(os.getenv("DASHBOARD_INTERVAL", 30))
+BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.5))
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -51,7 +54,7 @@ def _save_json_file(path: str, payload) -> None:
 
 def _discord_webhook_wait_url() -> str:
     if not DISCORD_WEBHOOK_URL:
-        raise ValueError("DISCORD_WEBHOOK_URL is missing in .env")
+        raise ValueError("DISCORD_WEBHOOK_URL_DASHBOARD is missing in .env")
 
     if "?" in DISCORD_WEBHOOK_URL:
         return f"{DISCORD_WEBHOOK_URL}&wait=true"
@@ -74,7 +77,7 @@ def _send_dashboard_message(content: str) -> str:
 
 def _edit_dashboard_message(message_id: str, content: str) -> None:
     if not DISCORD_WEBHOOK_URL:
-        raise ValueError("DISCORD_WEBHOOK_URL is missing in .env")
+        raise ValueError("DISCORD_WEBHOOK_URL_DASHBOARD is missing in .env")
 
     edit_url = f"{DISCORD_WEBHOOK_URL}/messages/{message_id}"
     response = requests.patch(
@@ -197,7 +200,137 @@ def save_zone_data_for_tickers(
     return results
 
 
-def _check_ticker_zones_worker(
+def _get_previous_day_levels(ticker: str) -> dict:
+    candles = get_daily_ohlc_3m(ticker, limit=3)
+    if len(candles) < 2:
+        raise ValueError(f"Not enough daily candles for {ticker}")
+
+    prev_day = candles[-2]
+    return {
+        "date": prev_day["date"],
+        "high": float(prev_day["high"]),
+        "low": float(prev_day["low"]),
+    }
+
+
+def _get_recent_5m_bars(ticker: str, limit: int = 200) -> list[dict]:
+    if not FMP_API_KEY:
+        raise ValueError("FMP_API_KEY is missing in .env")
+
+    url = "https://financialmodelingprep.com/stable/historical-chart/5min"
+    params = {
+        "symbol": ticker,
+        "apikey": FMP_API_KEY,
+    }
+
+    response = requests.get(url, params=params, timeout=20)
+    response.raise_for_status()
+    data = response.json()
+
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"No 5-minute data returned for {ticker}: {data}")
+
+    bars = []
+    for row in data:
+        dt_value = row.get("date") or row.get("datetime") or ""
+        bars.append({
+            "date": dt_value,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+
+    bars.reverse()
+    return bars[-limit:]
+
+
+def _get_latest_closed_5m_bar(ticker: str) -> dict:
+    bars = _get_recent_5m_bars(ticker, limit=2)
+    if not bars:
+        raise ValueError(f"No 5-minute bars found for {ticker}")
+    return bars[-1]
+
+
+
+
+
+def _get_latest_5m_volume_ratio(ticker: str) -> dict:
+    bars = _get_recent_5m_bars(ticker, limit=1000)
+
+    if not bars:
+        raise ValueError(f"No 5-minute bars found for {ticker}")
+
+    latest_bar = bars[-1]
+    latest_dt = latest_bar["date"]
+
+    if not latest_dt or " " not in latest_dt:
+        raise ValueError(f"Unexpected datetime format for {ticker}: {latest_dt}")
+
+    latest_date = datetime.strptime(latest_dt, "%Y-%m-%d %H:%M:%S").date()
+
+    # get last 5 days (calendar, not exact trading days but works well)
+    cutoff_date = latest_date - timedelta(days=7)
+
+    recent_bars = []
+    for b in bars:
+        dt = b["date"]
+        if not dt:
+            continue
+
+        d = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S").date()
+
+        if cutoff_date <= d <= latest_date:
+            recent_bars.append(b)
+
+    if not recent_bars:
+        raise ValueError(f"No recent 5-day bars found for {ticker}")
+
+    avg_volume = sum(b["volume"] for b in recent_bars) / len(recent_bars)
+    latest_volume = latest_bar["volume"]
+
+    ratio = 0.0 if avg_volume <= 0 else latest_volume / avg_volume
+
+    return {
+        "latest_volume": latest_volume,
+        "avg_volume": avg_volume,
+        "ratio": ratio,
+        "bar_time": latest_dt,
+    }
+
+
+def _find_recent_break(ticker: str) -> dict | None:
+    prev_day = _get_previous_day_levels(ticker)
+    bar = _get_latest_closed_5m_bar(ticker)
+
+    prev_high = float(prev_day["high"])
+    prev_low = float(prev_day["low"])
+    pct = BREAK_MAX_PCT / 100.0
+
+    upper_limit = prev_high * (1 + pct)
+    lower_limit = prev_low * (1 - pct)
+
+    if bar["high"] > prev_high and bar["low"] <= upper_limit:
+        return {
+            "type": "BREAK HIGH",
+            "level": round(prev_high, 2),
+            "trigger_price": round(bar["high"], 2),
+            "trigger_time": bar["date"],
+        }
+
+    if bar["low"] < prev_low and bar["high"] >= lower_limit:
+        return {
+            "type": "BREAK LOW",
+            "level": round(prev_low, 2),
+            "trigger_price": round(bar["low"], 2),
+            "trigger_time": bar["date"],
+        }
+
+    return None
+
+
+def _check_ticker_worker(
     ticker: str,
     daily_folder: str = "daily-zone-data",
     weekly_folder: str = "weekly-zone-data",
@@ -227,18 +360,28 @@ def _check_ticker_zones_worker(
                 "zone": zone,
             })
 
+    recent_break = None
+    try:
+        recent_break = _find_recent_break(ticker_lc)
+    except Exception as e:
+        print(f"Break check skipped for {ticker.upper()}: {e}")
+
+    volume_ratio = None
+    try:
+        volume_ratio = _get_latest_5m_volume_ratio(ticker_lc)
+    except Exception as e:
+        print(f"Volume ratio skipped for {ticker.upper()}: {e}")
+
     return {
         "ticker": ticker.upper(),
         "price": price,
         "hits": hits,
+        "break": recent_break,
+        "volume_ratio": volume_ratio,
     }
 
 
-def _hit_text_for_timeframe(hit_list: list[dict], timeframe: str) -> str:
-    """
-    Return only HIT text for the requested timeframe.
-    If no hit in that timeframe, return '-'
-    """
+def _zone_text_for_timeframe(hit_list: list[dict], timeframe: str) -> str:
     for hit in hit_list:
         if hit["timeframe"] == timeframe:
             zone = hit["zone"]
@@ -246,38 +389,85 @@ def _hit_text_for_timeframe(hit_list: list[dict], timeframe: str) -> str:
     return "-"
 
 
+def _break_text(break_info: dict | None) -> str:
+    if not break_info:
+        return "-"
+    return f"{break_info['type']} {break_info['level']}"
+
+
+def _volume_ratio_text(volume_info: dict | None) -> str:
+    if not volume_info:
+        return "-"
+    return f"{volume_info['ratio']:.2f}"
+
+
+def _daily_text(result: dict) -> str:
+    break_text = _break_text(result.get("break"))
+    zone_text = _zone_text_for_timeframe(result["hits"], "daily")
+
+    if break_text != "-" and zone_text != "-":
+        return f"{break_text}; {zone_text}"
+    if break_text != "-":
+        return break_text
+    if zone_text != "-":
+        return zone_text
+    return "-"
+
+
 def _build_dashboard_content(results: list[dict]) -> str:
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # only keep tickers that currently hit at least one zone
-    hit_results = [r for r in results if r["hits"]]
+    active_results = [
+        r for r in results
+        if r["hits"] or r.get("break")
+    ]
 
     lines = []
     lines.append("```")
     lines.append("LIVE ZONE HITS")
-    lines.append(f" Last Updated: {now_str}")
+    lines.append(f"Last Updated: {now_str}".center(92))
     lines.append("")
-    lines.append("Ticker  Price      Daily                          Weekly")
-    lines.append("------  ---------  -----------------------------  -----------------------------")
+    lines.append("Ticker  Price      Vol     Daily                         Weekly")
+    lines.append("------  ---------  ------  -----------------------------  -----------------------------")
 
-    if not hit_results:
-        lines.append("None    -          No active hits                 -")
+    if not active_results:
+        lines.append("None    -          -       No active hits                 -")
     else:
-        for result in sorted(hit_results, key=lambda x: x["ticker"]):
+        for result in sorted(active_results, key=lambda x: x["ticker"]):
             ticker = f"{result['ticker']:<6}"
             price = f"{result['price']:<9.2f}"
+            vol_text = _volume_ratio_text(result.get("volume_ratio"))[:6]
+            daily_text = _daily_text(result)[:29]
+            weekly_text = _zone_text_for_timeframe(result["hits"], "weekly")[:29]
 
-            daily_text = _hit_text_for_timeframe(result["hits"], "daily")[:29]
-            weekly_text = _hit_text_for_timeframe(result["hits"], "weekly")[:29]
-
-            lines.append(f"{ticker}  {price}  {daily_text:<29}  {weekly_text:<29}")
+            lines.append(
+                f"{ticker}  {price}  {vol_text:<6}  {daily_text:<29}  {weekly_text:<29}"
+            )
 
     lines.append("```")
     return "\n".join(lines)
 
 
+def _content_for_local_view(content: str) -> str:
+    lines = content.splitlines()
+
+    if lines and lines[0].strip() == "```":
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _save_dashboard_view(content: str) -> None:
+    clean_content = _content_for_local_view(content)
+    with open(DASHBOARD_VIEW_FILE, "w", encoding="utf-8") as f:
+        f.write(clean_content)
+
+
 def update_dashboard_message(results: list[dict]) -> None:
     content = _build_dashboard_content(results)
+    _save_dashboard_view(content)
     message_id = _get_or_create_dashboard_message(content)
     _edit_dashboard_message(message_id, content)
     print(f"Dashboard updated: message_id={message_id}")
@@ -291,10 +481,10 @@ def monitor_tickers_and_update_dashboard(
 ) -> list[dict]:
     results = []
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
-                _check_ticker_zones_worker,
+                _check_ticker_worker,
                 ticker,
                 daily_folder,
                 weekly_folder,
@@ -307,7 +497,23 @@ def monitor_tickers_and_update_dashboard(
             try:
                 result = future.result()
                 results.append(result)
-                print(f"{ticker.upper()} checked at {result['price']:.2f}")
+
+                parts = [f"{ticker.upper()} checked at {result['price']:.2f}"]
+
+                if result.get("break"):
+                    parts.append(
+                        f"{result['break']['type']} {result['break']['level']:.2f}"
+                    )
+
+                if result.get("volume_ratio"):
+                    parts.append(
+                        f"vol {result['volume_ratio']['ratio']:.2f}x"
+                    )
+
+                if result["hits"]:
+                    parts.append("zone hit")
+
+                print(" | ".join(parts))
             except Exception as e:
                 print(f"Error monitoring {ticker.upper()}: {e}")
 
@@ -319,8 +525,7 @@ if __name__ == "__main__":
     tickers = [
         "tsla", "mu", "aapl", "amzn", "amd", "avgo", "asml",
         "googl", "intc", "meta", "msft", "nvda", "orcl",
-        "pltr", "nflx", "mstr",
-        "hood", "coin"
+        "pltr", "nflx", "mstr", "hood", "coin"
     ]
 
     print("Generating zone data...")
@@ -330,7 +535,7 @@ if __name__ == "__main__":
         weekly_limit=WEEKLY_LIMIT,
     )
 
-    print("Starting hit-only dashboard...\n")
+    print("Starting combined zone + previous-day break dashboard...\n")
 
     while True:
         try:
@@ -342,5 +547,4 @@ if __name__ == "__main__":
         except Exception as e:
             print("Error in main loop:", e)
 
-        time.sleep(30)
-
+        time.sleep(CHECK_INTERVAL_SECONDS)
