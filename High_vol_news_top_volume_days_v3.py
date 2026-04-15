@@ -26,6 +26,7 @@ def _is_noise_article(title: str, site: str) -> bool:
     noise_patterns = [
         r"\btop\s+\d+\b",
         r"\bbest\b.*\bstock",
+        r"\bshould you\b",
         r"\bshould you buy\b",
         r"\breason to buy\b",
         r"\bstocks to buy\b",
