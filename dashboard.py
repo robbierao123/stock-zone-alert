@@ -26,7 +26,7 @@ DASHBOARD_STATE_FILE = os.getenv("DASHBOARD_STATE_FILE", "dashboard_state.json")
 DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 CHECK_INTERVAL_SECONDS = 20
-BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.5))
+BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
 
 
 def _ensure_folder(folder_name: str) -> Path:

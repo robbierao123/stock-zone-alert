@@ -1,10 +1,8 @@
 LIVE ZONE HITS
-                             Last Updated: 2026-04-15 13:17:02                              
+                             Last Updated: 2026-04-15 15:50:39                              
 
 Ticker  Price      Vol     Daily                         Weekly
 ------  ---------  ------  -----------------------------  -----------------------------
-ASML    1427.15    0.71    HIT support 1424.5-1427.58     -                            
-GOOGL   334.68     0.28    BREAK HIGH 333.29              -                            
-META    673.68     0.32    -                              HIT resistance 671.0-676.1   
-NFLX    106.62     2.79    BREAK HIGH 106.57              -                            
-NVDA    197.35     0.59    BREAK HIGH 196.51              -
+AMD     257.24     0.58    BREAK HIGH 255.46              -                            
+META    672.84     0.29    -                              HIT resistance 671.0-676.1   
+PLTR    142.11     0.26    -                              HIT support 141.56-142.34
