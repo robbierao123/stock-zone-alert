@@ -308,7 +308,9 @@ def _get_latest_5m_volume_ratio(ticker: str) -> dict:
 
 def _find_recent_break(ticker: str) -> dict | None:
     prev_day = _get_previous_day_levels(ticker)
-    bar = _get_latest_closed_5m_bar(ticker)
+
+    # ✅ use LIVE price instead of candle
+    price = get_live_price_full(ticker)
 
     prev_high = float(prev_day["high"])
     prev_low = float(prev_day["low"])
@@ -317,20 +319,22 @@ def _find_recent_break(ticker: str) -> dict | None:
     upper_limit = prev_high * (1 + pct)
     lower_limit = prev_low * (1 - pct)
 
-    if bar["high"] > prev_high and bar["low"] <= upper_limit:
+    # ✅ BREAK HIGH using live price
+    if price > prev_high and price <= upper_limit:
         return {
             "type": "BREAK HIGH",
             "level": round(prev_high, 2),
-            "trigger_price": round(bar["high"], 2),
-            "trigger_time": bar["date"],
+            "trigger_price": round(price, 2),
+            "trigger_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    if bar["low"] < prev_low and bar["high"] >= lower_limit:
+    # ✅ BREAK LOW using live price
+    if price < prev_low and price >= lower_limit:
         return {
             "type": "BREAK LOW",
             "level": round(prev_low, 2),
-            "trigger_price": round(bar["low"], 2),
-            "trigger_time": bar["date"],
+            "trigger_price": round(price, 2),
+            "trigger_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
     return None
