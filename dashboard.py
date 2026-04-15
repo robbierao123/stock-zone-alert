@@ -525,7 +525,7 @@ if __name__ == "__main__":
     tickers = [
         "tsla", "mu", "aapl", "amzn", "amd", "avgo", "asml",
         "googl", "intc", "meta", "msft", "nvda", "orcl",
-        "pltr", "nflx", "mstr", "hood", "coin"
+        "pltr", "nflx", "mstr", "hood", "coin", "hood"
     ]
 
     print("Generating zone data...")
