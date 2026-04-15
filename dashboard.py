@@ -246,25 +246,17 @@ def _get_recent_5m_bars(ticker: str, limit: int = 200) -> list[dict]:
     return bars[-limit:]
 
 
+from datetime import datetime, timedelta
+
+
 def _get_latest_closed_5m_bar(ticker: str) -> dict:
-    bars = _get_recent_5m_bars(ticker, limit=3)
+    bars = _get_recent_5m_bars(ticker, limit=10)
 
     if len(bars) < 2:
-        raise ValueError(f"Not enough 5m bars for {ticker}")
+        raise ValueError(f"Not enough 5-minute bars for {ticker}")
 
-    now = datetime.utcnow()
-
-    # assume bars sorted oldest → newest
-    latest = bars[-1]
-    prev = bars[-2]
-
-    latest_dt = datetime.strptime(latest["date"], "%Y-%m-%d %H:%M:%S")
-
-    # if latest bar is too recent → it's still forming → skip it
-    if (now - latest_dt) < timedelta(minutes=5):
-        return prev
-
-    return latest
+    # ALWAYS use previous candle (fully closed)
+    return bars[-2]
 
 
 
