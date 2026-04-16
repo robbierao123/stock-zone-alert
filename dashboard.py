@@ -1,10 +1,13 @@
 import json
 import os
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -28,7 +31,12 @@ FMP_API_KEY = os.getenv("FMP_API_KEY")
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 20))
 BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
 
+# Daily historical cache: built once outside the while loop
 PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
+
+# 5-minute candle-aware cache: one fetch per ticker per 5-minute bucket
+FIVE_MIN_CACHE: dict[str, tuple[list[dict], tuple[int, int, int, int, int]]] = {}
+FIVE_MIN_CACHE_LOCK = threading.Lock()
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -167,6 +175,7 @@ def save_zone_data_for_ticker(
     daily_dir = _ensure_folder(daily_folder)
     weekly_dir = _ensure_folder(weekly_folder)
 
+    # One daily historical fetch per ticker
     source_limit = max(daily_limit, weekly_limit)
     all_daily_candles = get_daily_ohlc_3m(ticker, limit=source_limit)
 
@@ -251,7 +260,7 @@ def save_zone_data_for_tickers(
     return results
 
 
-def _get_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
+def _fetch_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     if not FMP_API_KEY:
         raise ValueError("FMP_API_KEY is missing in .env")
 
@@ -280,13 +289,39 @@ def _get_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
             "volume": float(row.get("volume", 0)),
         })
 
-    bars.reverse()
+    bars.reverse()  # oldest -> newest
     return bars[-limit:]
+
+
+def _current_5m_bucket():
+    now = datetime.now(ZoneInfo("America/New_York"))
+    return (now.year, now.month, now.day, now.hour, now.minute // 5)
+
+
+def _get_recent_5m_bars_cached(ticker: str, limit: int = 1000) -> list[dict]:
+    ticker_lc = ticker.lower()
+    current_bucket = _current_5m_bucket()
+
+    with FIVE_MIN_CACHE_LOCK:
+        cached = FIVE_MIN_CACHE.get(ticker_lc)
+        if cached is not None:
+            bars, cached_bucket = cached
+            if cached_bucket == current_bucket:
+                return bars
+
+    bars = _fetch_recent_5m_bars(ticker_lc, limit=limit)
+
+    with FIVE_MIN_CACHE_LOCK:
+        FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
+
+    return bars
 
 
 def _get_latest_closed_5m_bar_from_bars(bars: list[dict], ticker: str) -> dict:
     if len(bars) < 2:
         raise ValueError(f"Not enough 5-minute bars for {ticker}")
+
+    # bars[-1] may still be forming
     return bars[-2]
 
 
@@ -299,10 +334,12 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
 
     daily_groups: dict[str, list[dict]] = defaultdict(list)
 
+    # Ignore newest possibly-forming bar
     for bar in bars[:-1]:
         dt = bar.get("date", "")
         if not dt or " " not in dt:
             continue
+
         day = dt.split(" ")[0]
         daily_groups[day].append(bar)
 
@@ -402,7 +439,7 @@ def _check_ticker_worker(
 
     volume_ratio = None
     try:
-        bars = _get_recent_5m_bars(ticker_lc, limit=1000)
+        bars = _get_recent_5m_bars_cached(ticker_lc, limit=1000)
         volume_ratio = _get_latest_5m_volume_ratio_from_bars(bars, ticker_lc)
     except Exception as e:
         print(f"Volume ratio skipped for {ticker.upper()}: {e}")
