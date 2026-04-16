@@ -1,8 +1,13 @@
 LIVE ZONE HITS
-                             Last Updated: 2026-04-16 01:47:32                              
+                             Last Updated: 2026-04-16 13:03:12                              
 
 Ticker  Price      Vol     Daily                         Weekly
 ------  ---------  ------  -----------------------------  -----------------------------
-AAPL    266.43     4.57    HIT resistance 266.15-266.82   -                            
-META    671.58     2.86    -                              HIT resistance 671.0-676.1   
-PLTR    142.15     1.46    -                              HIT support 141.56-142.34
+ASML    1425.55    0.77    HIT support 1424.5-1427.58     -                            
+AVGO    397.89     -       NEAR HIGH 397.08               -                            
+COIN    196.40     0.56    NEAR HIGH 196.46               -                            
+GOOGL   337.20     0.32    NEAR HIGH 337.48               -                            
+META    673.99     0.30    -                              HIT resistance 671.0-676.1   
+MSTR    143.16     0.64    NEAR HIGH 143.75               -                            
+NFLX    108.16     0.64    NEAR HIGH 107.85               -                            
+PLTR    142.47     0.45    NEAR HIGH 142.58               -

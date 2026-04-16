@@ -6,7 +6,6 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
@@ -29,7 +28,7 @@ DASHBOARD_STATE_FILE = os.getenv("DASHBOARD_STATE_FILE", "dashboard_state.json")
 DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 5))
-BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
+BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.5))
 
 # Daily historical cache: built once outside the while loop
 PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
@@ -293,7 +292,7 @@ def _fetch_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     return bars[-limit:]
 
 
-def _current_5m_bucket():
+def _current_5m_bucket() -> tuple[int, int, int, int, int]:
     now = datetime.now(ZoneInfo("America/New_York"))
     return (now.year, now.month, now.day, now.hour, now.minute // 5)
 
@@ -377,22 +376,26 @@ def _find_recent_break(ticker: str, live_price: float) -> dict | None:
 
     prev_high = float(prev_day["high"])
     prev_low = float(prev_day["low"])
-    pct = BREAK_MAX_PCT / 100.0
 
-    upper_limit = prev_high * (1 + pct)
-    lower_limit = prev_low * (1 - pct)
+    pct = BREAK_MAX_PCT / 100.0  # 0.05 -> 0.0005
 
-    if live_price > prev_high and live_price <= upper_limit:
+    high_lower = prev_high * (1 - pct)
+    high_upper = prev_high * (1 + pct)
+
+    low_lower = prev_low * (1 - pct)
+    low_upper = prev_low * (1 + pct)
+
+    if high_lower <= live_price <= high_upper:
         return {
-            "type": "BREAK HIGH",
+            "type": "NEAR HIGH",
             "level": round(prev_high, 2),
             "trigger_price": round(live_price, 2),
             "trigger_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    if live_price < prev_low and live_price >= lower_limit:
+    if low_lower <= live_price <= low_upper:
         return {
-            "type": "BREAK LOW",
+            "type": "NEAR LOW",
             "level": round(prev_low, 2),
             "trigger_price": round(live_price, 2),
             "trigger_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -597,7 +600,8 @@ if __name__ == "__main__":
     tickers = [
         "tsla", "mu", "aapl", "amzn", "amd", "avgo", "asml",
         "googl", "intc", "meta", "msft", "nvda", "orcl",
-        "pltr", "nflx", "mstr", "hood", "coin", "hood"
+        "pltr", "nflx", "mstr", "hood", "coin", "hood",
+        "QBTS", "BABA"
     ]
 
     unique_tickers = _get_unique_tickers(tickers)

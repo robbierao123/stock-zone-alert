@@ -1,10 +1,12 @@
+import os
 import tkinter as tk
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
 
 VIEW_FILE = "dashboard_view.txt"
-REFRESH_MS = 1000
 
+CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 5))
 
 class DashboardApp:
     def __init__(self, root):
@@ -128,7 +130,7 @@ class DashboardApp:
 
         if Path(VIEW_FILE).exists():
             self.status_label.config(
-                text=f"Status: Live auto-refresh running every {REFRESH_MS // 1000}s"
+                text=f"Status: Live auto-refresh running every {CHECK_INTERVAL_SECONDS}s"
             )
         else:
             self.status_label.config(text="Status: Waiting for dashboard_view.txt...")
@@ -150,7 +152,7 @@ class DashboardApp:
             self.last_content = content
 
         self.update_info_bar(content)
-        self.root.after(REFRESH_MS, self.update_loop)
+        self.root.after(CHECK_INTERVAL_SECONDS , self.update_loop)
 
 
 if __name__ == "__main__":
