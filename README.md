@@ -5,10 +5,15 @@ channel, and also at the local UI(python tkinder)
 make up your own .env file to run(fmp token, other variables .. )(run_all_dashboard file)
 
 FMP_API_KEY
+
 DISCORD_WEBHOOK_URL
+
 DAILY_LIMIT
+
 WEEKLY_LIMIT
+
 TOP_PICK
+
 DISCORD_WEBHOOK_URL_DASHBOARD
 
 CHECK_INTERVAL_SECONDS=5
