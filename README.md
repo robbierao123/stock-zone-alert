@@ -2,7 +2,7 @@ use FMP API, to extract US Stock data, the scanner is detacting KEY AREA (zones(
 channel, and also at the local UI(python tkinder)
 
 
-make up your own .env file to run(fmp token, other variables .. )
+make up your own .env file to run(fmp token, other variables .. )(run_all_dashboard file)
 
 FMP_API_KEY
 DISCORD_WEBHOOK_URL
