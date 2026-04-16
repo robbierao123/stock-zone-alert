@@ -1,9 +1,9 @@
 LIVE ZONE HITS
-                             Last Updated: 2026-04-15 16:56:22                              
+                             Last Updated: 2026-04-16 00:43:51                              
 
 Ticker  Price      Vol     Daily                         Weekly
 ------  ---------  ------  -----------------------------  -----------------------------
-AAPL    266.43     9.63    HIT resistance 266.15-266.82   -                            
-META    671.58     4.56    -                              HIT resistance 671.0-676.1   
-ORCL    169.80     3.96    BREAK HIGH 169.4               -                            
-PLTR    142.15     2.60    -                              HIT support 141.56-142.34
+AAPL    266.43     4.57    HIT resistance 266.15-266.82   -                            
+META    671.58     2.86    -                              HIT resistance 671.0-676.1   
+ORCL    169.80     1.72    BREAK HIGH 169.4               -                            
+PLTR    142.15     1.46    -                              HIT support 141.56-142.34

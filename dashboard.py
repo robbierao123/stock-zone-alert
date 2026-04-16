@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from collections import defaultdict
 
 import requests
 from dotenv import load_dotenv
@@ -25,8 +25,10 @@ DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL_DASHBOARD")
 DASHBOARD_STATE_FILE = os.getenv("DASHBOARD_STATE_FILE", "dashboard_state.json")
 DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
-CHECK_INTERVAL_SECONDS = 20
+CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 20))
 BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
+
+PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -112,6 +114,47 @@ def _load_zone_file(file_path: Path) -> dict:
         return json.load(f)
 
 
+def _get_unique_tickers(tickers: list[str]) -> list[str]:
+    seen = set()
+    unique = []
+
+    for ticker in tickers:
+        ticker_lc = ticker.lower()
+        if ticker_lc not in seen:
+            seen.add(ticker_lc)
+            unique.append(ticker_lc)
+
+    return unique
+
+
+def build_previous_day_levels_cache(tickers: list[str]) -> dict[str, dict]:
+    cache = {}
+
+    for ticker in tickers:
+        candles = get_daily_ohlc_3m(ticker, limit=3)
+
+        if len(candles) < 2:
+            raise ValueError(f"Not enough daily candles for {ticker}")
+
+        prev_day = candles[-2]
+        cache[ticker] = {
+            "date": prev_day["date"],
+            "high": float(prev_day["high"]),
+            "low": float(prev_day["low"]),
+        }
+
+    return cache
+
+
+def _get_previous_day_levels(ticker: str) -> dict:
+    ticker_lc = ticker.lower()
+
+    if ticker_lc not in PREV_DAY_LEVELS_CACHE:
+        raise ValueError(f"Previous day levels not cached for {ticker}")
+
+    return PREV_DAY_LEVELS_CACHE[ticker_lc]
+
+
 def save_zone_data_for_ticker(
     ticker: str,
     daily_limit: int = DAILY_LIMIT,
@@ -124,7 +167,16 @@ def save_zone_data_for_ticker(
     daily_dir = _ensure_folder(daily_folder)
     weekly_dir = _ensure_folder(weekly_folder)
 
-    daily_candles = get_daily_ohlc_3m(ticker, limit=daily_limit)
+    source_limit = max(daily_limit, weekly_limit)
+    all_daily_candles = get_daily_ohlc_3m(ticker, limit=source_limit)
+
+    if len(all_daily_candles) < daily_limit:
+        raise ValueError(
+            f"Not enough daily candles for {ticker}. "
+            f"Needed {daily_limit}, got {len(all_daily_candles)}"
+        )
+
+    daily_candles = all_daily_candles[-daily_limit:]
     daily_zones = detect_zones_from_daily(daily_candles)
 
     daily_payload = {
@@ -139,8 +191,7 @@ def save_zone_data_for_ticker(
     with daily_path.open("w", encoding="utf-8") as f:
         json.dump(daily_payload, f, indent=2)
 
-    weekly_source_daily = get_daily_ohlc_3m(ticker, limit=weekly_limit)
-    weekly_candles = convert_daily_to_weekly(weekly_source_daily)
+    weekly_candles = convert_daily_to_weekly(all_daily_candles)
     weekly_zones = detect_zones_from_weekly(
         weekly_candles,
         tolerance_pct=0.0075,
@@ -151,7 +202,7 @@ def save_zone_data_for_ticker(
     weekly_payload = {
         "ticker": ticker.upper(),
         "timeframe": "weekly",
-        "source_daily_lookback": weekly_limit,
+        "source_daily_lookback": source_limit,
         "weekly_candle_count": len(weekly_candles),
         "zone_count": len(weekly_zones),
         "zones": weekly_zones,
@@ -200,20 +251,7 @@ def save_zone_data_for_tickers(
     return results
 
 
-def _get_previous_day_levels(ticker: str) -> dict:
-    candles = get_daily_ohlc_3m(ticker, limit=3)
-    if len(candles) < 2:
-        raise ValueError(f"Not enough daily candles for {ticker}")
-
-    prev_day = candles[-2]
-    return {
-        "date": prev_day["date"],
-        "high": float(prev_day["high"]),
-        "low": float(prev_day["low"]),
-    }
-
-
-def _get_recent_5m_bars(ticker: str, limit: int = 200) -> list[dict]:
+def _get_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     if not FMP_API_KEY:
         raise ValueError("FMP_API_KEY is missing in .env")
 
@@ -246,56 +284,46 @@ def _get_recent_5m_bars(ticker: str, limit: int = 200) -> list[dict]:
     return bars[-limit:]
 
 
-from datetime import datetime, timedelta
-
-
-def _get_latest_closed_5m_bar(ticker: str) -> dict:
-    bars = _get_recent_5m_bars(ticker, limit=10)
-
+def _get_latest_closed_5m_bar_from_bars(bars: list[dict], ticker: str) -> dict:
     if len(bars) < 2:
         raise ValueError(f"Not enough 5-minute bars for {ticker}")
-
-    # ALWAYS use previous candle (fully closed)
     return bars[-2]
 
 
+def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict:
+    if len(bars) < 2:
+        raise ValueError(f"Not enough 5-minute bars for {ticker}")
 
-
-
-def _get_latest_5m_volume_ratio(ticker: str) -> dict:
-    bars = _get_recent_5m_bars(ticker, limit=1000)
-
-    if not bars:
-        raise ValueError(f"No 5-minute bars found for {ticker}")
-
-    latest_bar = bars[-1]
+    latest_bar = _get_latest_closed_5m_bar_from_bars(bars, ticker)
     latest_dt = latest_bar["date"]
 
-    if not latest_dt or " " not in latest_dt:
-        raise ValueError(f"Unexpected datetime format for {ticker}: {latest_dt}")
+    daily_groups: dict[str, list[dict]] = defaultdict(list)
 
-    latest_date = datetime.strptime(latest_dt, "%Y-%m-%d %H:%M:%S").date()
-
-    # get last 5 days (calendar, not exact trading days but works well)
-    cutoff_date = latest_date - timedelta(days=7)
-
-    recent_bars = []
-    for b in bars:
-        dt = b["date"]
-        if not dt:
+    for bar in bars[:-1]:
+        dt = bar.get("date", "")
+        if not dt or " " not in dt:
             continue
+        day = dt.split(" ")[0]
+        daily_groups[day].append(bar)
 
-        d = datetime.strptime(dt, "%Y-%m-%d %H:%M:%S").date()
+    days = sorted(daily_groups.keys())
 
-        if cutoff_date <= d <= latest_date:
-            recent_bars.append(b)
+    if len(days) < 5:
+        raise ValueError(
+            f"Need at least 5 trading days of 5-minute bars for {ticker}, got {len(days)}"
+        )
 
-    if not recent_bars:
-        raise ValueError(f"No recent 5-day bars found for {ticker}")
+    last_5_days = days[-5:]
 
-    avg_volume = sum(b["volume"] for b in recent_bars) / len(recent_bars)
+    baseline_bars = []
+    for day in last_5_days:
+        baseline_bars.extend(daily_groups[day])
+
+    if not baseline_bars:
+        raise ValueError(f"No baseline 5-minute bars found for {ticker}")
+
+    avg_volume = sum(bar["volume"] for bar in baseline_bars) / len(baseline_bars)
     latest_volume = latest_bar["volume"]
-
     ratio = 0.0 if avg_volume <= 0 else latest_volume / avg_volume
 
     return {
@@ -303,14 +331,12 @@ def _get_latest_5m_volume_ratio(ticker: str) -> dict:
         "avg_volume": avg_volume,
         "ratio": ratio,
         "bar_time": latest_dt,
+        "days_used": last_5_days,
     }
 
 
-def _find_recent_break(ticker: str) -> dict | None:
+def _find_recent_break(ticker: str, live_price: float) -> dict | None:
     prev_day = _get_previous_day_levels(ticker)
-
-    # ✅ use LIVE price instead of candle
-    price = get_live_price_full(ticker)
 
     prev_high = float(prev_day["high"])
     prev_low = float(prev_day["low"])
@@ -319,21 +345,19 @@ def _find_recent_break(ticker: str) -> dict | None:
     upper_limit = prev_high * (1 + pct)
     lower_limit = prev_low * (1 - pct)
 
-    # ✅ BREAK HIGH using live price
-    if price > prev_high and price <= upper_limit:
+    if live_price > prev_high and live_price <= upper_limit:
         return {
             "type": "BREAK HIGH",
             "level": round(prev_high, 2),
-            "trigger_price": round(price, 2),
+            "trigger_price": round(live_price, 2),
             "trigger_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-    # ✅ BREAK LOW using live price
-    if price < prev_low and price >= lower_limit:
+    if live_price < prev_low and live_price >= lower_limit:
         return {
             "type": "BREAK LOW",
             "level": round(prev_low, 2),
-            "trigger_price": round(price, 2),
+            "trigger_price": round(live_price, 2),
             "trigger_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -372,13 +396,14 @@ def _check_ticker_worker(
 
     recent_break = None
     try:
-        recent_break = _find_recent_break(ticker_lc)
+        recent_break = _find_recent_break(ticker_lc, price)
     except Exception as e:
         print(f"Break check skipped for {ticker.upper()}: {e}")
 
     volume_ratio = None
     try:
-        volume_ratio = _get_latest_5m_volume_ratio(ticker_lc)
+        bars = _get_recent_5m_bars(ticker_lc, limit=1000)
+        volume_ratio = _get_latest_5m_volume_ratio_from_bars(bars, ticker_lc)
     except Exception as e:
         print(f"Volume ratio skipped for {ticker.upper()}: {e}")
 
@@ -517,7 +542,7 @@ def monitor_tickers_and_update_dashboard(
 
                 if result.get("volume_ratio"):
                     parts.append(
-                        f"vol {result['volume_ratio']['ratio']:.2f}x"
+                        f"vol {result['volume_ratio']['ratio']:.2f}"
                     )
 
                 if result["hits"]:
@@ -538,9 +563,14 @@ if __name__ == "__main__":
         "pltr", "nflx", "mstr", "hood", "coin", "hood"
     ]
 
+    unique_tickers = _get_unique_tickers(tickers)
+
+    print("Building previous-day cache...")
+    PREV_DAY_LEVELS_CACHE = build_previous_day_levels_cache(unique_tickers)
+
     print("Generating zone data...")
     save_zone_data_for_tickers(
-        tickers=tickers,
+        tickers=unique_tickers,
         daily_limit=DAILY_LIMIT,
         weekly_limit=WEEKLY_LIMIT,
     )
@@ -551,8 +581,8 @@ if __name__ == "__main__":
         try:
             print(f"Running check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             monitor_tickers_and_update_dashboard(
-                tickers=tickers,
-                max_workers=len(tickers),
+                tickers=unique_tickers,
+                max_workers=len(unique_tickers),
             )
         except Exception as e:
             print("Error in main loop:", e)
