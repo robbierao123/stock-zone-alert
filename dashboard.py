@@ -301,33 +301,33 @@ def _get_recent_5m_bars_cached(ticker: str, limit: int = 1000) -> list[dict]:
     ticker_lc = ticker.lower()
     current_bucket = _current_5m_bucket()
 
-    # ✅ Try cache first
     with FIVE_MIN_CACHE_LOCK:
         cached = FIVE_MIN_CACHE.get(ticker_lc)
         if cached is not None:
             bars, cached_bucket = cached
             if cached_bucket == current_bucket:
-                return bars
+                days = set()
+                for bar in bars:
+                    dt = bar.get("date", "")
+                    if " " in dt:
+                        days.add(dt.split(" ")[0])
 
-    # 🔄 Fetch fresh
+                if len(days) >= 3:
+                    return bars
+                else:
+                    del FIVE_MIN_CACHE[ticker_lc]
+
     bars = _fetch_recent_5m_bars(ticker_lc, limit=limit)
 
-    # 🔍 Count distinct trading days (inline, no extra function)
     days = set()
     for bar in bars:
         dt = bar.get("date", "")
         if " " in dt:
             days.add(dt.split(" ")[0])
 
-    days_count = len(days)
-
-    # ✅ Cache ONLY if >= 3 days
-    if days_count >= 3:
+    if len(days) >= 3:
         with FIVE_MIN_CACHE_LOCK:
             FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
-        print(f"[CACHE SET] {ticker.upper()} days={days_count}")
-    else:
-        print(f"[SKIP CACHE] {ticker.upper()} days={days_count}")
 
     return bars
 
