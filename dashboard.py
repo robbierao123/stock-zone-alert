@@ -301,6 +301,7 @@ def _get_recent_5m_bars_cached(ticker: str, limit: int = 1000) -> list[dict]:
     ticker_lc = ticker.lower()
     current_bucket = _current_5m_bucket()
 
+    # ✅ Try cache first
     with FIVE_MIN_CACHE_LOCK:
         cached = FIVE_MIN_CACHE.get(ticker_lc)
         if cached is not None:
@@ -308,10 +309,25 @@ def _get_recent_5m_bars_cached(ticker: str, limit: int = 1000) -> list[dict]:
             if cached_bucket == current_bucket:
                 return bars
 
+    # 🔄 Fetch fresh
     bars = _fetch_recent_5m_bars(ticker_lc, limit=limit)
 
-    with FIVE_MIN_CACHE_LOCK:
-        FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
+    # 🔍 Count distinct trading days (inline, no extra function)
+    days = set()
+    for bar in bars:
+        dt = bar.get("date", "")
+        if " " in dt:
+            days.add(dt.split(" ")[0])
+
+    days_count = len(days)
+
+    # ✅ Cache ONLY if >= 3 days
+    if days_count >= 3:
+        with FIVE_MIN_CACHE_LOCK:
+            FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
+        print(f"[CACHE SET] {ticker.upper()} days={days_count}")
+    else:
+        print(f"[SKIP CACHE] {ticker.upper()} days={days_count}")
 
     return bars
 
@@ -333,7 +349,7 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
 
     daily_groups: dict[str, list[dict]] = defaultdict(list)
 
-    # Ignore newest possibly-forming bar
+    # ignore newest possibly-forming bar
     for bar in bars[:-1]:
         dt = bar.get("date", "")
         if not dt or " " not in dt:
@@ -344,15 +360,20 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
 
     days = sorted(daily_groups.keys())
 
-    if len(days) < 5:
-        raise ValueError(
-            f"Need at least 5 trading days of 5-minute bars for {ticker}, got {len(days)}"
-        )
+    if not days:
+        raise ValueError(f"No usable 5-minute bars for {ticker}")
 
-    last_5_days = days[-5:]
+    # use up to last 5 trading days, but do not fail if fewer exist
+    days_used = days[-5:]
 
+    days_count = len(days_used)
+
+    # 🚨 NEW FILTER (key change)
+    if days_count < 3:
+        return None
+    
     baseline_bars = []
-    for day in last_5_days:
+    for day in days_used:
         baseline_bars.extend(daily_groups[day])
 
     if not baseline_bars:
@@ -367,7 +388,8 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
         "avg_volume": avg_volume,
         "ratio": ratio,
         "bar_time": latest_dt,
-        "days_used": last_5_days,
+        "days_used": days_used,
+        "days_count": len(days_used),
     }
 
 
