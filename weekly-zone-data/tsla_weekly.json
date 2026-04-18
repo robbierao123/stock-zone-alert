@@ -8,25 +8,7 @@
     {
       "type": "resistance",
       "low": 354.99,
-      "high": 357.54,
-      "touches": 5
-    },
-    {
-      "type": "resistance",
-      "low": 449.67,
-      "high": 454.3,
-      "touches": 5
-    },
-    {
-      "type": "support",
-      "low": 416.58,
-      "high": 419.08,
-      "touches": 4
-    },
-    {
-      "type": "support",
-      "low": 381.4,
-      "high": 385.39,
+      "high": 355.87,
       "touches": 4
     },
     {
@@ -34,6 +16,24 @@
       "low": 434.22,
       "high": 435.3,
       "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 416.58,
+      "high": 417.86,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 367.71,
+      "high": 367.72,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 444.98,
+      "high": 445.04,
+      "touches": 2
     }
   ]
 }

@@ -122,7 +122,7 @@ def draw_weekly_zones_chart(
 
     weekly_zones = detect_zones_from_weekly(
         weekly_candles,
-        tolerance_pct=0.002,
+        tolerance_pct=0.003,
         min_touches=2,
         overlap_min_touches=2
     )

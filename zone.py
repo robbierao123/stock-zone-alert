@@ -40,7 +40,7 @@ def get_daily_ohlc_3m(ticker: str, limit: int = 90) -> list[dict]:
 
 def detect_zones_from_daily(
     candles: list[dict],
-    tolerance_pct: float = 0.002,
+    tolerance_pct: float = 0.003,
     min_touches: int = 2,
     overlap_min_touches: int = 2,
     pivot_left: int = 3,
@@ -249,7 +249,7 @@ def convert_daily_to_weekly(daily_candles: list[dict]) -> list[dict]:
     return weekly
 def detect_zones_from_weekly(
     candles: list[dict],
-    tolerance_pct: float = 0.002,
+    tolerance_pct: float = 0.003,
     min_touches: int = 3,
     overlap_min_touches: int = 2,
     pivot_left: int = 3,

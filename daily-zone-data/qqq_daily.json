@@ -12,20 +12,20 @@
     },
     {
       "type": "support",
-      "low": 597.99,
+      "low": 596.42,
       "high": 599.73,
-      "touches": 7
+      "touches": 9
+    },
+    {
+      "type": "support",
+      "low": 600.72,
+      "high": 603.43,
+      "touches": 8
     },
     {
       "type": "resistance",
       "low": 603.16,
       "high": 604.14,
-      "touches": 6
-    },
-    {
-      "type": "support",
-      "low": 600.72,
-      "high": 602.26,
       "touches": 6
     },
     {

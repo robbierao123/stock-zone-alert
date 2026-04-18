@@ -7,33 +7,33 @@
   "zones": [
     {
       "type": "resistance",
-      "low": 610.35,
-      "high": 619.32,
-      "touches": 11
+      "low": 612.88,
+      "high": 614.03,
+      "touches": 5
+    },
+    {
+      "type": "resistance",
+      "low": 627.94,
+      "high": 630.0,
+      "touches": 5
     },
     {
       "type": "support",
       "low": 594.76,
-      "high": 600.28,
-      "touches": 9
+      "high": 597.17,
+      "touches": 5
     },
     {
       "type": "resistance",
-      "low": 622.85,
-      "high": 630.0,
-      "touches": 9
+      "low": 616.83,
+      "high": 619.32,
+      "touches": 5
     },
     {
       "type": "support",
-      "low": 584.37,
-      "high": 593.34,
-      "touches": 7
-    },
-    {
-      "type": "support",
-      "low": 555.6,
-      "high": 561.57,
-      "touches": 6
+      "low": 558.61,
+      "high": 559.54,
+      "touches": 4
     }
   ]
 }
