@@ -2,7 +2,7 @@
   "ticker": "QQQ",
   "timeframe": "daily",
   "lookback_days": 45,
-  "zone_count": 4,
+  "zone_count": 5,
   "zones": [
     {
       "type": "resistance",
@@ -14,19 +14,25 @@
       "type": "support",
       "low": 597.99,
       "high": 599.73,
-      "touches": 8
+      "touches": 7
     },
     {
       "type": "resistance",
       "low": 603.16,
-      "high": 604.81,
-      "touches": 7
+      "high": 604.14,
+      "touches": 6
     },
     {
       "type": "support",
       "low": 600.72,
       "high": 602.26,
       "touches": 6
+    },
+    {
+      "type": "resistance",
+      "low": 612.43,
+      "high": 613.67,
+      "touches": 5
     }
   ]
 }

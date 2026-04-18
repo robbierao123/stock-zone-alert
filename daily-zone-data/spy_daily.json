@@ -2,25 +2,31 @@
   "ticker": "SPY",
   "timeframe": "daily",
   "lookback_days": 45,
-  "zone_count": 4,
+  "zone_count": 5,
   "zones": [
-    {
-      "type": "support",
-      "low": 679.62,
-      "high": 681.73,
-      "touches": 8
-    },
     {
       "type": "resistance",
       "low": 684.94,
       "high": 687.09,
-      "touches": 6
+      "touches": 7
     },
     {
       "type": "resistance",
       "low": 688.35,
       "high": 690.06,
       "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 679.62,
+      "high": 680.37,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 681.55,
+      "high": 682.83,
+      "touches": 4
     },
     {
       "type": "resistance",
