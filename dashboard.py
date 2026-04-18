@@ -398,7 +398,7 @@ def _find_recent_break(ticker: str, live_price: float) -> dict | None:
     prev_high = float(prev_day["high"])
     prev_low = float(prev_day["low"])
 
-    pct = BREAK_MAX_PCT / 100.0  # 0.05 -> 0.0005
+    pct = BREAK_MAX_PCT / 100.0  # 0.05 -> 0.005
 
     high_lower = prev_high * (1 - pct)
     high_upper = prev_high * (1 + pct)
