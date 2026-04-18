@@ -619,12 +619,11 @@ def monitor_tickers_and_update_dashboard(
 
 
 if __name__ == "__main__":
-    tickers = [
-        "tsla", "mu", "aapl", "amzn", "amd", "avgo", "asml",
-        "googl", "intc", "meta", "msft", "nvda", "orcl",
-        "pltr", "nflx", "mstr", "hood", "coin", "hood",
-        "QBTS", "BABA"
-    ]
+    tickers = [ "tsla", "mu",
+     "aapl", "amzn", "amd", "avgo",
+    "googl", "intc", "meta", "msft", "nvda",
+    "orcl", "pltr",  "intc"
+    ,"nflx","mstr","hood","coin","pltr","baba","spy","qqq"]
 
     unique_tickers = _get_unique_tickers(tickers)
 

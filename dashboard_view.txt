@@ -1,13 +1,11 @@
 LIVE ZONE HITS
-                             Last Updated: 2026-04-17 15:04:36                              
+                             Last Updated: 2026-04-17 18:54:41                              
 
 Ticker  Price      Vol     Daily                         Weekly
 ------  ---------  ------  -----------------------------  -----------------------------
-AMZN    250.99     0.85    NEAR HIGH 250.0                -                            
-ASML    1456.80    0.63    NEAR HIGH 1453.92              -                            
-BABA    141.19     0.42    NEAR HIGH 140.9                -                            
-GOOGL   341.68     0.85    -                              HIT resistance 340.49-342.29 
-MSFT    421.55     0.66    NEAR HIGH 420.82               -                            
-NFLX    96.63      1.29    -                              HIT resistance 95.86-96.75   
-ORCL    173.86     1.25    NEAR LOW 173.8                 -                            
-QBTS    21.61      2.05    -                              HIT resistance 21.52-21.7
+AMD     278.39     1.69    NEAR HIGH 279.34               -                            
+AMZN    250.56     1.79    NEAR HIGH 250.0                -                            
+ASML    1459.80    2.38    NEAR HIGH 1453.92              -                            
+BABA    141.00     2.13    NEAR HIGH 140.9                -                            
+INTC    68.50      1.83    NEAR HIGH 68.61                -                            
+MSFT    422.79     1.90    NEAR HIGH 420.82               -

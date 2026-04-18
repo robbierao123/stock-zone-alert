@@ -169,10 +169,10 @@ def save_weekly_zones_chart(ticker: str, limit: int = 250) -> str:
 
 if __name__ == "__main__":
     tickers = [ "tsla", "mu",
-     "aapl", "amzn", "amd", "avgo", "asml",
+     "aapl", "amzn", "amd", "avgo",
     "googl", "intc", "meta", "msft", "nvda",
-    "orcl", "pltr", "rddt", "sndk", "stx","intc"
-    ,"nflx","mstr","hood","coin","pltr","baba","uso","xom","xle","hood"]
+    "orcl", "pltr",  "intc"
+    ,"nflx","mstr","hood","coin","pltr","baba","spy","qqq"]
 
     for ticker in tickers:
         try:
