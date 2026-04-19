@@ -1,0 +1,38 @@
+{
+  "ticker": "AMD",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 202.86,
+      "high": 203.79,
+      "touches": 6
+    },
+    {
+      "type": "support",
+      "low": 194.8,
+      "high": 195.26,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 197.69,
+      "high": 198.56,
+      "touches": 5
+    },
+    {
+      "type": "resistance",
+      "low": 205.88,
+      "high": 206.59,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 198.74,
+      "high": 199.68,
+      "touches": 4
+    }
+  ]
+}

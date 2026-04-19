@@ -1,0 +1,38 @@
+{
+  "ticker": "INTC",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 46.44,
+      "high": 46.65,
+      "touches": 6
+    },
+    {
+      "type": "support",
+      "low": 43.91,
+      "high": 44.05,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 45.39,
+      "high": 45.46,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 43.18,
+      "high": 43.28,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 43.54,
+      "high": 43.74,
+      "touches": 4
+    }
+  ]
+}

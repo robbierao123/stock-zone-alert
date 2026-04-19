@@ -1,0 +1,38 @@
+{
+  "ticker": "MSTR",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 139.69,
+      "high": 140.19,
+      "touches": 6
+    },
+    {
+      "type": "resistance",
+      "low": 132.12,
+      "high": 132.49,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 133.94,
+      "high": 134.28,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 125.76,
+      "high": 126.13,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 143.7,
+      "high": 143.85,
+      "touches": 3
+    }
+  ]
+}

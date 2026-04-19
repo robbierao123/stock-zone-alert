@@ -1,0 +1,38 @@
+{
+  "ticker": "MSFT",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 372.45,
+      "high": 373.99,
+      "touches": 6
+    },
+    {
+      "type": "support",
+      "low": 396.32,
+      "high": 398.05,
+      "touches": 6
+    },
+    {
+      "type": "resistance",
+      "low": 400.12,
+      "high": 401.47,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 394.25,
+      "high": 395.16,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 389.88,
+      "high": 391.0,
+      "touches": 4
+    }
+  ]
+}

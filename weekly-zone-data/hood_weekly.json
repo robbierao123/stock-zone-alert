@@ -1,0 +1,39 @@
+{
+  "ticker": "HOOD",
+  "timeframe": "weekly",
+  "source_daily_lookback": 250,
+  "weekly_candle_count": 52,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 72.8,
+      "high": 72.87,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 77.7,
+      "high": 77.87,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 113.87,
+      "high": 114.1,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 124.35,
+      "high": 124.7,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 120.46,
+      "high": 120.88,
+      "touches": 3
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "ticker": "NFLX",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 95.34,
+      "high": 95.75,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 95.1,
+      "high": 95.33,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 90.58,
+      "high": 90.82,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 98.46,
+      "high": 98.74,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 75.01,
+      "high": 75.3,
+      "touches": 4
+    }
+  ]
+}

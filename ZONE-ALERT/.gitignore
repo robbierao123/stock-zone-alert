@@ -1,0 +1,9 @@
+.env
+*.png
+/__pycache__
+*.png
+*.json
+*.png
+/weekly-zone-data
+/chart
+/chart

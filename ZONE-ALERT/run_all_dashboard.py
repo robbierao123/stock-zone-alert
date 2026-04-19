@@ -2,10 +2,10 @@ import multiprocessing
 import os
 
 def run_dashboard():
-    os.system("python dashboard.py")
+    os.system("python ZONE-ALERT/dashboard.py")
 
 def run_local_ui():
-    os.system("python local_dashboard.py")
+    os.system("python ZONE-ALERT/local_dashboard.py")
 
 if __name__ == "__main__":
     p1 = multiprocessing.Process(target=run_dashboard)

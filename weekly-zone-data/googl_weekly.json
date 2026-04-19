@@ -1,0 +1,39 @@
+{
+  "ticker": "GOOGL",
+  "timeframe": "weekly",
+  "source_daily_lookback": 250,
+  "weekly_candle_count": 52,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 181.11,
+      "high": 181.43,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 321.31,
+      "high": 322.5,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 295.18,
+      "high": 295.18,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 311.42,
+      "high": 311.42,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 342.29,
+      "high": 342.32,
+      "touches": 2
+    }
+  ]
+}

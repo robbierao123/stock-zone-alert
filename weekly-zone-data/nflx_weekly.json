@@ -1,0 +1,39 @@
+{
+  "ticker": "NFLX",
+  "timeframe": "weekly",
+  "source_daily_lookback": 250,
+  "weekly_candle_count": 52,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 124.69,
+      "high": 125.12,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 119.63,
+      "high": 120.19,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 90.69,
+      "high": 90.82,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 123.71,
+      "high": 123.89,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 118.06,
+      "high": 118.28,
+      "touches": 3
+    }
+  ]
+}
