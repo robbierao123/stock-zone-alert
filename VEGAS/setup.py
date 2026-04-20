@@ -205,7 +205,7 @@ def main():
     symbol = "SPY"
 
     current_file_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(os.path.dirname(current_file_dir), "VEGAS-CHART")
+    output_dir = os.path.join(os.path.dirname(current_file_dir), "VEGAS/VEGAS-CHART")
     os.makedirs(output_dir, exist_ok=True)
 
     output_file = os.path.join(output_dir, f"{symbol}_vegas_1h.png")
