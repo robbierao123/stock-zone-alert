@@ -28,7 +28,7 @@ DASHBOARD_STATE_FILE = os.getenv("DASHBOARD_STATE_FILE", "dashboard_state.json")
 DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 5))
-BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.5))
+BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
 
 # Daily historical cache: built once outside the while loop
 PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
