@@ -136,15 +136,30 @@ def _get_unique_tickers(tickers: list[str]) -> list[str]:
 
 def build_previous_day_levels_cache(tickers: list[str]) -> dict[str, dict]:
     cache = {}
+    ny_today = datetime.now(ZoneInfo("America/New_York")).date()
 
     for ticker in tickers:
-        candles = get_daily_ohlc_3m(ticker, limit=3)
+        candles = get_daily_ohlc_3m(ticker, limit=5)
 
-        if len(candles) < 2:
-            raise ValueError(f"Not enough daily candles for {ticker}")
+        if not candles:
+            raise ValueError(f"No daily candles for {ticker}")
 
-        prev_day = candles[-2]
-        cache[ticker] = {
+        closed_candles = []
+
+        for candle in candles:
+            candle_date = datetime.strptime(candle["date"], "%Y-%m-%d").date()
+
+            # only keep fully closed daily candles
+            # if today's daily candle exists intraday, skip it
+            if candle_date < ny_today:
+                closed_candles.append(candle)
+
+        if not closed_candles:
+            raise ValueError(f"No closed daily candles found for {ticker}")
+
+        prev_day = closed_candles[-1]
+
+        cache[ticker.lower()] = {
             "date": prev_day["date"],
             "high": float(prev_day["high"]),
             "low": float(prev_day["low"]),
