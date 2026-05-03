@@ -3,7 +3,8 @@ import sys
 import subprocess
 
 def run_dashboard():
-    subprocess.run([sys.executable, "ZONE-ALERT/dashboard.py"])
+    # subprocess.run([sys.executable, "ZONE-ALERT/dashboard.py"])
+    subprocess.run([sys.executable, "ZONE-ALERT/dashboard_modified.py"])
 
 def run_local_ui():
     subprocess.run([sys.executable, "ZONE-ALERT/local_dashboard.py"])
