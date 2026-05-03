@@ -3,7 +3,7 @@ import os
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
@@ -29,7 +29,9 @@ DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 5))
 BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
-RETEST_LOOKBACK_MINUTES = int(os.getenv("RETEST_LOOKBACK_MINUTES", 30))
+# Retest lookback window. Default: past 2 hours.
+# Supports decimals, e.g. RETEST_LOOKBACK_HOURS=0.5 for 30 minutes.
+RETEST_LOOKBACK_HOURS = float(os.getenv("RETEST_LOOKBACK_HOURS", 2))
 
 # Daily historical cache: built once outside the while loop
 PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
@@ -467,20 +469,71 @@ def _get_previous_day_level_zones(ticker: str) -> list[dict]:
     return zones
 
 
+def _parse_5m_bar_datetime(bar: dict) -> datetime | None:
+    """
+    Parse FMP 5-minute bar datetime as New York time.
+    Returns None if the timestamp format is unusable.
+    """
+    dt_value = str(bar.get("date") or bar.get("datetime") or "").strip()
+    if not dt_value:
+        return None
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(dt_value, fmt)
+            return parsed.replace(tzinfo=ZoneInfo("America/New_York"))
+        except ValueError:
+            continue
+
+    return None
+
+
 def _latest_closed_5m_bars_in_lookback(
     bars: list[dict],
-    lookback_minutes: int = RETEST_LOOKBACK_MINUTES,
+    lookback_hours: float = RETEST_LOOKBACK_HOURS,
 ) -> list[dict]:
     """
-    Return latest closed 5m candles inside the lookback window.
-    FMP usually returns bars with the newest possibly-forming bar as bars[-1],
-    so closed bars are bars[:-1].
+    Return closed 5m candles from the past lookback_hours.
+
+    Robust behavior:
+    - Uses actual bar timestamps when available.
+    - Excludes the currently-forming 5m candle by requiring bar_time + 5 minutes <= now.
+    - Works with only 1 closed 5m candle after market open.
+    - Falls back to the last N bars if timestamps cannot be parsed.
     """
-    if len(bars) < 2:
+    if not bars:
         return []
 
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    lookback_start = now_ny - timedelta(hours=lookback_hours)
+
+    timestamp_filtered: list[tuple[datetime, dict]] = []
+
+    for bar in bars:
+        bar_dt = _parse_5m_bar_datetime(bar)
+        if bar_dt is None:
+            continue
+
+        is_closed = bar_dt + timedelta(minutes=5) <= now_ny
+        in_lookback = bar_dt >= lookback_start
+
+        if is_closed and in_lookback:
+            timestamp_filtered.append((bar_dt, bar))
+
+    if timestamp_filtered:
+        timestamp_filtered.sort(key=lambda item: item[0])
+        return [bar for _, bar in timestamp_filtered]
+
+    # Fallback: if timestamps are unusable or delayed, use count-based logic.
+    # This still accepts 1 available 5m candle.
+    if len(bars) == 1:
+        return bars
+
     closed_bars = bars[:-1]
-    lookback_count = max(1, lookback_minutes // 5)
+    if not closed_bars:
+        return []
+
+    lookback_count = max(1, int(lookback_hours * 12))
     return closed_bars[-lookback_count:]
 
 
@@ -530,7 +583,7 @@ def _check_zone_break_retest(
             "zone_low": round(zone_low, 2),
             "zone_high": round(zone_high, 2),
             "price": round(live_price, 2),
-            "lookback_minutes": RETEST_LOOKBACK_MINUTES,
+            "lookback_hours": RETEST_LOOKBACK_HOURS,
             "last_closed_bar": recent_bars[-1].get("date"),
         }
 
@@ -543,7 +596,7 @@ def _check_zone_break_retest(
             "zone_low": round(zone_low, 2),
             "zone_high": round(zone_high, 2),
             "price": round(live_price, 2),
-            "lookback_minutes": RETEST_LOOKBACK_MINUTES,
+            "lookback_hours": RETEST_LOOKBACK_HOURS,
             "last_closed_bar": recent_bars[-1].get("date"),
         }
 
