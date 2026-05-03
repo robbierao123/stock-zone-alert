@@ -1,11 +1,12 @@
 import multiprocessing
-import os
+import sys
+import subprocess
 
 def run_dashboard():
-    os.system("python ZONE-ALERT/dashboard.py")
+    subprocess.run([sys.executable, "ZONE-ALERT/dashboard.py"])
 
 def run_local_ui():
-    os.system("python ZONE-ALERT/local_dashboard.py")
+    subprocess.run([sys.executable, "ZONE-ALERT/local_dashboard.py"])
 
 if __name__ == "__main__":
     p1 = multiprocessing.Process(target=run_dashboard)
