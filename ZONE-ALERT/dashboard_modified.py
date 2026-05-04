@@ -492,49 +492,53 @@ def _latest_closed_5m_bars_in_lookback(
     bars: list[dict],
     lookback_hours: float = RETEST_LOOKBACK_HOURS,
 ) -> list[dict]:
-    """
-    Return closed 5m candles from the past lookback_hours.
 
-    Robust behavior:
-    - Uses actual bar timestamps when available.
-    - Excludes the currently-forming 5m candle by requiring bar_time + 5 minutes <= now.
-    - Works with only 1 closed 5m candle after market open.
-    - Falls back to the last N bars if timestamps cannot be parsed.
-    """
     if not bars:
         return []
 
-    now_ny = datetime.now(ZoneInfo("America/New_York"))
-    lookback_start = now_ny - timedelta(hours=lookback_hours)
+    now = datetime.now(ZoneInfo("America/New_York"))
+    today_str = now.strftime("%Y-%m-%d")
 
-    timestamp_filtered: list[tuple[datetime, dict]] = []
+    # keep only today's bars
+    today_bars = [
+        bar for bar in bars
+        if bar.get("date", "").startswith(today_str)
+    ]
 
-    for bar in bars:
-        bar_dt = _parse_5m_bar_datetime(bar)
-        if bar_dt is None:
-            continue
-
-        is_closed = bar_dt + timedelta(minutes=5) <= now_ny
-        in_lookback = bar_dt >= lookback_start
-
-        if is_closed and in_lookback:
-            timestamp_filtered.append((bar_dt, bar))
-
-    if timestamp_filtered:
-        timestamp_filtered.sort(key=lambda item: item[0])
-        return [bar for _, bar in timestamp_filtered]
-
-    # Fallback: if timestamps are unusable or delayed, use count-based logic.
-    # This still accepts 1 available 5m candle.
-    if len(bars) == 1:
-        return bars
-
-    closed_bars = bars[:-1]
-    if not closed_bars:
+    if not today_bars:
         return []
 
-    lookback_count = max(1, int(lookback_hours * 12))
-    return closed_bars[-lookback_count:]
+    # remove forming candle if possible
+    if len(today_bars) >= 2:
+        closed_bars = today_bars[:-1]
+    else:
+        closed_bars = today_bars
+
+    # calculate cutoff time
+    cutoff_time = now.timestamp() - (lookback_hours * 3600)
+
+    recent_bars = []
+
+    for bar in closed_bars:
+        dt_str = bar.get("date")
+        if not dt_str:
+            continue
+
+        try:
+            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=ZoneInfo("America/New_York")
+            )
+        except:
+            continue
+
+        if dt.timestamp() >= cutoff_time:
+            recent_bars.append(bar)
+
+    # fallback: ensure at least 1 candle
+    if not recent_bars and closed_bars:
+        return [closed_bars[-1]]
+
+    return recent_bars
 
 
 def _check_zone_break_retest(
