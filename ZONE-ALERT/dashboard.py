@@ -524,14 +524,35 @@ def _daily_text(result: dict) -> str:
         return zone_text
     return "-"
 
+def _is_inside_previous_day_range(result: dict) -> bool:
+    """Return True when the live price is inside yesterday's low-high range."""
+    try:
+        prev_day = _get_previous_day_levels(result["ticker"])
+        prev_low = float(prev_day["low"])
+        prev_high = float(prev_day["high"])
+        price = float(result["price"])
 
+        return prev_low <= price <= prev_high
+
+    except Exception as e:
+        print(
+            f"Previous-day range filter skipped for "
+            f"{result.get('ticker', '?')}: {e}"
+        )
+        return False
+    
 def _build_dashboard_content(results: list[dict]) -> str:
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # active_results = [
+    #     r for r in results
+    #     if r["hits"] or r.get("break")
+    # ]
     active_results = [
-        r for r in results
-        if r["hits"] or r.get("break")
-    ]
+    r for r in results
+    if (r["hits"] or r.get("break"))
+    and not _is_inside_previous_day_range(r)
+]
 
     lines = []
     lines.append("```")
@@ -637,7 +658,7 @@ if __name__ == "__main__":
      "aapl", "amzn", "amd", "avgo",
     "googl", "intc", "meta", "msft", "nvda",
     "orcl", "pltr",  "intc"
-    ,"nflx","mstr","hood","coin","pltr","baba","spy","qqq"]
+    ,"nflx","mstr","hood","coin","rklb","baba","spy","qqq","tsm"]
 
     unique_tickers = _get_unique_tickers(tickers)
 
