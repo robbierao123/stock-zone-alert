@@ -3,7 +3,7 @@ import os
 import time
 import threading
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from zoneinfo import ZoneInfo
@@ -36,6 +36,11 @@ PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
 # 5-minute candle-aware cache: one fetch per ticker per 5-minute bucket
 FIVE_MIN_CACHE: dict[str, tuple[list[dict], tuple[int, int, int, int, int]]] = {}
 FIVE_MIN_CACHE_LOCK = threading.Lock()
+
+# 1-year same-time-of-day volume baseline cache.
+# ticker -> {"asof": YYYY-MM-DD, "slots": {"09:30": {...}, ...}}
+VOLUME_BASELINE_CACHE: dict[str, dict] = {}
+VOLUME_BASELINE_CACHE_LOCK = threading.Lock()
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -273,6 +278,24 @@ def save_zone_data_for_tickers(
     return results
 
 
+def _normalize_5m_rows(data: list[dict]) -> list[dict]:
+    bars = []
+    for row in data:
+        dt_value = row.get("date") or row.get("datetime") or ""
+        bars.append({
+            "date": dt_value,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+
+    # FMP normally returns newest -> oldest. Normalize once here.
+    bars.sort(key=lambda x: x["date"])
+    return bars
+
+
 def _fetch_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     if not FMP_API_KEY:
         raise ValueError("FMP_API_KEY is missing in .env")
@@ -290,20 +313,109 @@ def _fetch_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     if not isinstance(data, list) or not data:
         raise ValueError(f"No 5-minute data returned for {ticker}: {data}")
 
-    bars = []
-    for row in data:
-        dt_value = row.get("date") or row.get("datetime") or ""
-        bars.append({
-            "date": dt_value,
-            "open": float(row["open"]),
-            "high": float(row["high"]),
-            "low": float(row["low"]),
-            "close": float(row["close"]),
-            "volume": float(row.get("volume", 0)),
-        })
-
-    bars.reverse()  # oldest -> newest
+    bars = _normalize_5m_rows(data)
     return bars[-limit:]
+
+
+def _fetch_1y_5m_bars(ticker: str) -> list[dict]:
+    """Fetch approximately one year of 5-minute history for same-time volume baselines."""
+    if not FMP_API_KEY:
+        raise ValueError("FMP_API_KEY is missing in .env")
+
+    ny_today = datetime.now(ZoneInfo("America/New_York")).date()
+    # End yesterday so today's volume can never contaminate its own baseline.
+    end_date = ny_today - timedelta(days=1)
+    start_date = end_date - timedelta(days=365)
+
+    url = "https://financialmodelingprep.com/stable/historical-chart/5min"
+    params = {
+        "symbol": ticker,
+        "from": start_date.isoformat(),
+        "to": end_date.isoformat(),
+        "apikey": FMP_API_KEY,
+    }
+
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"No 1-year 5-minute data returned for {ticker}: {data}")
+
+    return _normalize_5m_rows(data)
+
+
+def _build_same_time_volume_baseline(ticker: str) -> dict:
+    """
+    Build a 1-year average volume for each exact 5-minute clock slot.
+
+    Example:
+        today's 09:30 bar is compared only with historical 09:30 bars
+        (the 09:30-09:35 candle), not with 09:35, 10:00, etc.
+    """
+    ticker_lc = ticker.lower()
+    bars = _fetch_1y_5m_bars(ticker_lc)
+
+    slot_volumes: dict[str, list[float]] = defaultdict(list)
+    slot_dates: dict[str, list[str]] = defaultdict(list)
+
+    for bar in bars:
+        dt = bar.get("date", "")
+        if not dt or " " not in dt:
+            continue
+
+        day, time_part = dt.split(" ", 1)
+        hhmm = time_part[:5]
+
+        # Regular U.S. session only. This keeps 09:30 comparable to 09:30,
+        # and avoids premarket/after-hours bars entering the baseline.
+        if not ("09:30" <= hhmm <= "15:55"):
+            continue
+
+        volume = float(bar.get("volume", 0))
+        if volume < 0:
+            continue
+
+        slot_volumes[hhmm].append(volume)
+        slot_dates[hhmm].append(day)
+
+    slots = {}
+    for hhmm, volumes in slot_volumes.items():
+        if not volumes:
+            continue
+
+        slots[hhmm] = {
+            "avg_volume": sum(volumes) / len(volumes),
+            "sample_count": len(volumes),
+            "first_date": min(slot_dates[hhmm]),
+            "last_date": max(slot_dates[hhmm]),
+        }
+
+    if not slots:
+        raise ValueError(f"No regular-session 1-year 5-minute baseline data for {ticker}")
+
+    return {
+        "asof": datetime.now(ZoneInfo("America/New_York")).date().isoformat(),
+        "slots": slots,
+    }
+
+
+def _get_same_time_volume_baseline(ticker: str) -> dict:
+    """Return today's cached 1-year same-time baseline, rebuilding once per day."""
+    ticker_lc = ticker.lower()
+    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+    with VOLUME_BASELINE_CACHE_LOCK:
+        cached = VOLUME_BASELINE_CACHE.get(ticker_lc)
+        if cached and cached.get("asof") == today:
+            return cached
+
+    baseline = _build_same_time_volume_baseline(ticker_lc)
+
+    with VOLUME_BASELINE_CACHE_LOCK:
+        VOLUME_BASELINE_CACHE[ticker_lc] = baseline
+
+    return baseline
 
 
 def _current_5m_bucket() -> tuple[int, int, int, int, int]:
@@ -320,28 +432,12 @@ def _get_recent_5m_bars_cached(ticker: str, limit: int = 1000) -> list[dict]:
         if cached is not None:
             bars, cached_bucket = cached
             if cached_bucket == current_bucket:
-                days = set()
-                for bar in bars:
-                    dt = bar.get("date", "")
-                    if " " in dt:
-                        days.add(dt.split(" ")[0])
-
-                if len(days) >= 3:
-                    return bars
-                else:
-                    del FIVE_MIN_CACHE[ticker_lc]
+                return bars
 
     bars = _fetch_recent_5m_bars(ticker_lc, limit=limit)
 
-    days = set()
-    for bar in bars:
-        dt = bar.get("date", "")
-        if " " in dt:
-            days.add(dt.split(" ")[0])
-
-    if len(days) >= 3:
-        with FIVE_MIN_CACHE_LOCK:
-            FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
+    with FIVE_MIN_CACHE_LOCK:
+        FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
 
     return bars
 
@@ -355,46 +451,43 @@ def _get_latest_closed_5m_bar_from_bars(bars: list[dict], ticker: str) -> dict:
 
 
 def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict:
+    """
+    Compare the latest CLOSED 5-minute candle against the average volume of
+    that exact same 5-minute time slot over approximately the prior 1 year.
+
+    Example:
+        latest bar = 2026-09-08 09:30
+        baseline   = average of prior-year 09:30 bars only
+        ratio      = today's 09:30 volume / 1-year avg 09:30 volume
+    """
     if len(bars) < 2:
         raise ValueError(f"Not enough 5-minute bars for {ticker}")
 
     latest_bar = _get_latest_closed_5m_bar_from_bars(bars, ticker)
-    latest_dt = latest_bar["date"]
+    latest_dt = latest_bar.get("date", "")
 
-    daily_groups: dict[str, list[dict]] = defaultdict(list)
+    if not latest_dt or " " not in latest_dt:
+        raise ValueError(f"Invalid latest 5-minute timestamp for {ticker}: {latest_dt}")
 
-    # ignore newest possibly-forming bar
-    for bar in bars[:-1]:
-        dt = bar.get("date", "")
-        if not dt or " " not in dt:
-            continue
+    time_slot = latest_dt.split(" ", 1)[1][:5]
 
-        day = dt.split(" ")[0]
-        daily_groups[day].append(bar)
-
-    days = sorted(daily_groups.keys())
-
-    if not days:
-        raise ValueError(f"No usable 5-minute bars for {ticker}")
-
-    # use up to last 5 trading days, but do not fail if fewer exist
-    days_used = days[-5:]
-
-    days_count = len(days_used)
-
-    # 🚨 NEW FILTER (key change)
-    if days_count < 3:
+    # Volume comparison is intended for regular-session 5-minute candles.
+    if not ("09:30" <= time_slot <= "15:55"):
         return None
-    
-    baseline_bars = []
-    for day in days_used:
-        baseline_bars.extend(daily_groups[day])
 
-    if not baseline_bars:
-        raise ValueError(f"No baseline 5-minute bars found for {ticker}")
+    baseline = _get_same_time_volume_baseline(ticker)
+    slot_info = baseline["slots"].get(time_slot)
 
-    avg_volume = sum(bar["volume"] for bar in baseline_bars) / len(baseline_bars)
-    latest_volume = latest_bar["volume"]
+    if not slot_info:
+        return None
+
+    # Require a meaningful amount of historical data. A normal year should
+    # contain ~250 samples for each regular-session 5-minute slot.
+    if slot_info["sample_count"] < 50:
+        return None
+
+    avg_volume = float(slot_info["avg_volume"])
+    latest_volume = float(latest_bar["volume"])
     ratio = 0.0 if avg_volume <= 0 else latest_volume / avg_volume
 
     return {
@@ -402,8 +495,10 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
         "avg_volume": avg_volume,
         "ratio": ratio,
         "bar_time": latest_dt,
-        "days_used": days_used,
-        "days_count": len(days_used),
+        "time_slot": time_slot,
+        "sample_count": slot_info["sample_count"],
+        "baseline_first_date": slot_info["first_date"],
+        "baseline_last_date": slot_info["last_date"],
     }
 
 
@@ -633,11 +728,10 @@ def monitor_tickers_and_update_dashboard(
 
 
 if __name__ == "__main__":
-    tickers = [ "tsla", "mu",
+    tickers = ["tsla", "mu",
      "aapl", "amzn", "amd", "avgo",
     "googl", "intc", "meta", "msft", "nvda",
-    "orcl", "pltr",  "intc"
-    ,"nflx","mstr","hood","coin","pltr","baba","spy","qqq"]
+    "orcl", "pltr", "nflx","mstr","hood","coin","baba","spy","qqq","SMH"]
 
     unique_tickers = _get_unique_tickers(tickers)
 
