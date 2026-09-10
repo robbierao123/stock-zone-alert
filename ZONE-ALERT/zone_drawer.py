@@ -171,7 +171,7 @@ if __name__ == "__main__":
      "aapl", "amzn", "amd", "avgo",
     "googl", "intc", "meta", "msft", "nvda",
     "orcl", "pltr",  "intc"
-    ,"nflx","mstr","hood","coin","pltr","baba","spy","qqq"]
+    ,"nflx","mstr","hood","coin","pltr","baba","spy","qqq","SMH","NBIS","SKHY","SPCX"]
 
     for ticker in tickers:
         try:

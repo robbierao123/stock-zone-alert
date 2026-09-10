@@ -29,6 +29,11 @@ DASHBOARD_VIEW_FILE = os.getenv("DASHBOARD_VIEW_FILE", "dashboard_view.txt")
 FMP_API_KEY = os.getenv("FMP_API_KEY")
 CHECK_INTERVAL_SECONDS = int(os.getenv("CHECK_INTERVAL_SECONDS", 5))
 BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
+# Retest lookback window. Default: past 2 hours.
+# Supports decimals, e.g. RETEST_LOOKBACK_HOURS=0.5 for 30 minutes.
+RETEST_LOOKBACK_HOURS = float(os.getenv("RETEST_LOOKBACK_HOURS", 2))
+HOURLY_EMA_PERIOD = int(os.getenv("HOURLY_EMA_PERIOD", 240))
+HOURLY_EMA_PROXIMITY_PCT = float(os.getenv("HOURLY_EMA_PROXIMITY_PCT", 0.5))
 
 # Daily historical cache: built once outside the while loop
 PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
@@ -37,10 +42,9 @@ PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
 FIVE_MIN_CACHE: dict[str, tuple[list[dict], tuple[int, int, int, int, int]]] = {}
 FIVE_MIN_CACHE_LOCK = threading.Lock()
 
-# 1-year same-time-of-day volume baseline cache.
-# ticker -> {"asof": YYYY-MM-DD, "slots": {"09:30": {...}, ...}}
-VOLUME_BASELINE_CACHE: dict[str, dict] = {}
-VOLUME_BASELINE_CACHE_LOCK = threading.Lock()
+# Hourly EMA cache: rebuilt at most once per ticker per NY clock hour.
+HOURLY_EMA_CACHE: dict[str, tuple[float, tuple[int, int, int, int]]] = {}
+HOURLY_EMA_CACHE_LOCK = threading.Lock()
 
 
 def _ensure_folder(folder_name: str) -> Path:
@@ -278,24 +282,6 @@ def save_zone_data_for_tickers(
     return results
 
 
-def _normalize_5m_rows(data: list[dict]) -> list[dict]:
-    bars = []
-    for row in data:
-        dt_value = row.get("date") or row.get("datetime") or ""
-        bars.append({
-            "date": dt_value,
-            "open": float(row["open"]),
-            "high": float(row["high"]),
-            "low": float(row["low"]),
-            "close": float(row["close"]),
-            "volume": float(row.get("volume", 0)),
-        })
-
-    # FMP normally returns newest -> oldest. Normalize once here.
-    bars.sort(key=lambda x: x["date"])
-    return bars
-
-
 def _fetch_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     if not FMP_API_KEY:
         raise ValueError("FMP_API_KEY is missing in .env")
@@ -313,109 +299,20 @@ def _fetch_recent_5m_bars(ticker: str, limit: int = 1000) -> list[dict]:
     if not isinstance(data, list) or not data:
         raise ValueError(f"No 5-minute data returned for {ticker}: {data}")
 
-    bars = _normalize_5m_rows(data)
+    bars = []
+    for row in data:
+        dt_value = row.get("date") or row.get("datetime") or ""
+        bars.append({
+            "date": dt_value,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+
+    bars.reverse()  # oldest -> newest
     return bars[-limit:]
-
-
-def _fetch_1y_5m_bars(ticker: str) -> list[dict]:
-    """Fetch approximately one year of 5-minute history for same-time volume baselines."""
-    if not FMP_API_KEY:
-        raise ValueError("FMP_API_KEY is missing in .env")
-
-    ny_today = datetime.now(ZoneInfo("America/New_York")).date()
-    # End yesterday so today's volume can never contaminate its own baseline.
-    end_date = ny_today - timedelta(days=1)
-    start_date = end_date - timedelta(days=365)
-
-    url = "https://financialmodelingprep.com/stable/historical-chart/5min"
-    params = {
-        "symbol": ticker,
-        "from": start_date.isoformat(),
-        "to": end_date.isoformat(),
-        "apikey": FMP_API_KEY,
-    }
-
-    response = requests.get(url, params=params, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-
-    if not isinstance(data, list) or not data:
-        raise ValueError(f"No 1-year 5-minute data returned for {ticker}: {data}")
-
-    return _normalize_5m_rows(data)
-
-
-def _build_same_time_volume_baseline(ticker: str) -> dict:
-    """
-    Build a 1-year average volume for each exact 5-minute clock slot.
-
-    Example:
-        today's 09:30 bar is compared only with historical 09:30 bars
-        (the 09:30-09:35 candle), not with 09:35, 10:00, etc.
-    """
-    ticker_lc = ticker.lower()
-    bars = _fetch_1y_5m_bars(ticker_lc)
-
-    slot_volumes: dict[str, list[float]] = defaultdict(list)
-    slot_dates: dict[str, list[str]] = defaultdict(list)
-
-    for bar in bars:
-        dt = bar.get("date", "")
-        if not dt or " " not in dt:
-            continue
-
-        day, time_part = dt.split(" ", 1)
-        hhmm = time_part[:5]
-
-        # Regular U.S. session only. This keeps 09:30 comparable to 09:30,
-        # and avoids premarket/after-hours bars entering the baseline.
-        if not ("09:30" <= hhmm <= "15:55"):
-            continue
-
-        volume = float(bar.get("volume", 0))
-        if volume < 0:
-            continue
-
-        slot_volumes[hhmm].append(volume)
-        slot_dates[hhmm].append(day)
-
-    slots = {}
-    for hhmm, volumes in slot_volumes.items():
-        if not volumes:
-            continue
-
-        slots[hhmm] = {
-            "avg_volume": sum(volumes) / len(volumes),
-            "sample_count": len(volumes),
-            "first_date": min(slot_dates[hhmm]),
-            "last_date": max(slot_dates[hhmm]),
-        }
-
-    if not slots:
-        raise ValueError(f"No regular-session 1-year 5-minute baseline data for {ticker}")
-
-    return {
-        "asof": datetime.now(ZoneInfo("America/New_York")).date().isoformat(),
-        "slots": slots,
-    }
-
-
-def _get_same_time_volume_baseline(ticker: str) -> dict:
-    """Return today's cached 1-year same-time baseline, rebuilding once per day."""
-    ticker_lc = ticker.lower()
-    today = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
-
-    with VOLUME_BASELINE_CACHE_LOCK:
-        cached = VOLUME_BASELINE_CACHE.get(ticker_lc)
-        if cached and cached.get("asof") == today:
-            return cached
-
-    baseline = _build_same_time_volume_baseline(ticker_lc)
-
-    with VOLUME_BASELINE_CACHE_LOCK:
-        VOLUME_BASELINE_CACHE[ticker_lc] = baseline
-
-    return baseline
 
 
 def _current_5m_bucket() -> tuple[int, int, int, int, int]:
@@ -432,12 +329,28 @@ def _get_recent_5m_bars_cached(ticker: str, limit: int = 1000) -> list[dict]:
         if cached is not None:
             bars, cached_bucket = cached
             if cached_bucket == current_bucket:
-                return bars
+                days = set()
+                for bar in bars:
+                    dt = bar.get("date", "")
+                    if " " in dt:
+                        days.add(dt.split(" ")[0])
+
+                if len(days) >= 3:
+                    return bars
+                else:
+                    del FIVE_MIN_CACHE[ticker_lc]
 
     bars = _fetch_recent_5m_bars(ticker_lc, limit=limit)
 
-    with FIVE_MIN_CACHE_LOCK:
-        FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
+    days = set()
+    for bar in bars:
+        dt = bar.get("date", "")
+        if " " in dt:
+            days.add(dt.split(" ")[0])
+
+    if len(days) >= 3:
+        with FIVE_MIN_CACHE_LOCK:
+            FIVE_MIN_CACHE[ticker_lc] = (bars, current_bucket)
 
     return bars
 
@@ -451,43 +364,46 @@ def _get_latest_closed_5m_bar_from_bars(bars: list[dict], ticker: str) -> dict:
 
 
 def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict:
-    """
-    Compare the latest CLOSED 5-minute candle against the average volume of
-    that exact same 5-minute time slot over approximately the prior 1 year.
-
-    Example:
-        latest bar = 2026-09-08 09:30
-        baseline   = average of prior-year 09:30 bars only
-        ratio      = today's 09:30 volume / 1-year avg 09:30 volume
-    """
     if len(bars) < 2:
         raise ValueError(f"Not enough 5-minute bars for {ticker}")
 
     latest_bar = _get_latest_closed_5m_bar_from_bars(bars, ticker)
-    latest_dt = latest_bar.get("date", "")
+    latest_dt = latest_bar["date"]
 
-    if not latest_dt or " " not in latest_dt:
-        raise ValueError(f"Invalid latest 5-minute timestamp for {ticker}: {latest_dt}")
+    daily_groups: dict[str, list[dict]] = defaultdict(list)
 
-    time_slot = latest_dt.split(" ", 1)[1][:5]
+    # ignore newest possibly-forming bar
+    for bar in bars[:-1]:
+        dt = bar.get("date", "")
+        if not dt or " " not in dt:
+            continue
 
-    # Volume comparison is intended for regular-session 5-minute candles.
-    if not ("09:30" <= time_slot <= "15:55"):
+        day = dt.split(" ")[0]
+        daily_groups[day].append(bar)
+
+    days = sorted(daily_groups.keys())
+
+    if not days:
+        raise ValueError(f"No usable 5-minute bars for {ticker}")
+
+    # use up to last 5 trading days, but do not fail if fewer exist
+    days_used = days[-5:]
+
+    days_count = len(days_used)
+
+    # 🚨 NEW FILTER (key change)
+    if days_count < 3:
         return None
+    
+    baseline_bars = []
+    for day in days_used:
+        baseline_bars.extend(daily_groups[day])
 
-    baseline = _get_same_time_volume_baseline(ticker)
-    slot_info = baseline["slots"].get(time_slot)
+    if not baseline_bars:
+        raise ValueError(f"No baseline 5-minute bars found for {ticker}")
 
-    if not slot_info:
-        return None
-
-    # Require a meaningful amount of historical data. A normal year should
-    # contain ~250 samples for each regular-session 5-minute slot.
-    if slot_info["sample_count"] < 50:
-        return None
-
-    avg_volume = float(slot_info["avg_volume"])
-    latest_volume = float(latest_bar["volume"])
+    avg_volume = sum(bar["volume"] for bar in baseline_bars) / len(baseline_bars)
+    latest_volume = latest_bar["volume"]
     ratio = 0.0 if avg_volume <= 0 else latest_volume / avg_volume
 
     return {
@@ -495,10 +411,114 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
         "avg_volume": avg_volume,
         "ratio": ratio,
         "bar_time": latest_dt,
-        "time_slot": time_slot,
-        "sample_count": slot_info["sample_count"],
-        "baseline_first_date": slot_info["first_date"],
-        "baseline_last_date": slot_info["last_date"],
+        "days_used": days_used,
+        "days_count": len(days_used),
+    }
+
+
+def _current_hour_bucket() -> tuple[int, int, int, int]:
+    now = datetime.now(ZoneInfo("America/New_York"))
+    return (now.year, now.month, now.day, now.hour)
+
+
+def _fetch_hourly_bars(ticker: str) -> list[dict]:
+    """Fetch enough closed 1-hour bars to calculate the 240-period EMA."""
+    if not FMP_API_KEY:
+        raise ValueError("FMP_API_KEY is missing in .env")
+
+    ny_now = datetime.now(ZoneInfo("America/New_York"))
+    start_date = (ny_now.date() - timedelta(days=180)).isoformat()
+    end_date = ny_now.date().isoformat()
+
+    url = "https://financialmodelingprep.com/stable/historical-chart/1hour"
+    params = {
+        "symbol": ticker,
+        "from": start_date,
+        "to": end_date,
+        "apikey": FMP_API_KEY,
+    }
+
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    if not isinstance(data, list) or not data:
+        raise ValueError(f"No 1-hour data returned for {ticker}: {data}")
+
+    bars = []
+    for row in data:
+        dt_value = row.get("date") or row.get("datetime") or ""
+        bars.append({
+            "date": dt_value,
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row.get("volume", 0)),
+        })
+
+    bars.sort(key=lambda x: x["date"])
+
+    current_hour = ny_now.replace(minute=0, second=0, microsecond=0)
+    closed_bars = []
+    for bar in bars:
+        dt_text = bar.get("date", "")
+        parsed = None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                parsed = datetime.strptime(dt_text, fmt).replace(tzinfo=ZoneInfo("America/New_York"))
+                break
+            except ValueError:
+                pass
+        if parsed is not None and parsed < current_hour:
+            closed_bars.append(bar)
+
+    return closed_bars
+
+
+def _calculate_ema(closes: list[float], period: int) -> float:
+    if len(closes) < period:
+        raise ValueError(f"Need at least {period} closes, got {len(closes)}")
+
+    ema = sum(closes[:period]) / period
+    multiplier = 2.0 / (period + 1.0)
+    for close in closes[period:]:
+        ema = (close - ema) * multiplier + ema
+    return ema
+
+
+def _get_hourly_ema_240_cached(ticker: str) -> float:
+    ticker_lc = ticker.lower()
+    current_bucket = _current_hour_bucket()
+
+    with HOURLY_EMA_CACHE_LOCK:
+        cached = HOURLY_EMA_CACHE.get(ticker_lc)
+        if cached is not None:
+            ema_value, cached_bucket = cached
+            if cached_bucket == current_bucket:
+                return ema_value
+
+    bars = _fetch_hourly_bars(ticker_lc)
+    closes = [float(bar["close"]) for bar in bars]
+    ema_value = _calculate_ema(closes, HOURLY_EMA_PERIOD)
+
+    with HOURLY_EMA_CACHE_LOCK:
+        HOURLY_EMA_CACHE[ticker_lc] = (ema_value, current_bucket)
+
+    return ema_value
+
+
+def _get_hourly_ema_proximity(ticker: str, live_price: float) -> dict | None:
+    ema_value = _get_hourly_ema_240_cached(ticker)
+    if ema_value <= 0:
+        return None
+
+    distance_pct = ((float(live_price) - ema_value) / ema_value) * 100.0
+    return {
+        "ema": ema_value,
+        "distance_pct": distance_pct,
+        "position": "ABOVE" if distance_pct >= 0 else "BELOW",
+        "within_range": abs(distance_pct) <= HOURLY_EMA_PROXIMITY_PCT,
     }
 
 
@@ -534,6 +554,209 @@ def _find_recent_break(ticker: str, live_price: float) -> dict | None:
 
     return None
 
+
+
+def _get_previous_day_level_zones(ticker: str) -> list[dict]:
+    """
+    Convert previous-day high/low into small alert zones so the same
+    break -> retest logic can be applied to prior-day levels too.
+    Width uses BREAK_MAX_PCT, the same tolerance already used by _find_recent_break().
+    """
+    prev_day = _get_previous_day_levels(ticker)
+    pct = BREAK_MAX_PCT / 100.0
+
+    zones = []
+    for level_name, level_value in (
+        ("previous high", float(prev_day["high"])),
+        ("previous low", float(prev_day["low"])),
+    ):
+        zones.append({
+            "type": level_name,
+            "low": round(level_value * (1 - pct), 2),
+            "high": round(level_value * (1 + pct), 2),
+            "level": round(level_value, 2),
+            "touches": 1,
+        })
+
+    return zones
+
+
+def _parse_5m_bar_datetime(bar: dict) -> datetime | None:
+    """
+    Parse FMP 5-minute bar datetime as New York time.
+    Returns None if the timestamp format is unusable.
+    """
+    dt_value = str(bar.get("date") or bar.get("datetime") or "").strip()
+    if not dt_value:
+        return None
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(dt_value, fmt)
+            return parsed.replace(tzinfo=ZoneInfo("America/New_York"))
+        except ValueError:
+            continue
+
+    return None
+
+
+def _latest_closed_5m_bars_in_lookback(
+    bars: list[dict],
+    lookback_hours: float = RETEST_LOOKBACK_HOURS,
+) -> list[dict]:
+
+    if not bars:
+        return []
+
+    now = datetime.now(ZoneInfo("America/New_York"))
+    today_str = now.strftime("%Y-%m-%d")
+
+    # keep only today's bars
+    today_bars = [
+        bar for bar in bars
+        if bar.get("date", "").startswith(today_str)
+    ]
+
+    if not today_bars:
+        return []
+
+    # remove forming candle if possible
+    if len(today_bars) >= 2:
+        closed_bars = today_bars[:-1]
+    else:
+        closed_bars = today_bars
+
+    # calculate cutoff time
+    cutoff_time = now.timestamp() - (lookback_hours * 3600)
+
+    recent_bars = []
+
+    for bar in closed_bars:
+        dt_str = bar.get("date")
+        if not dt_str:
+            continue
+
+        try:
+            dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=ZoneInfo("America/New_York")
+            )
+        except:
+            continue
+
+        if dt.timestamp() >= cutoff_time:
+            recent_bars.append(bar)
+
+    # fallback: ensure at least 1 candle
+    if not recent_bars and closed_bars:
+        return [closed_bars[-1]]
+
+    return recent_bars
+
+
+def _check_zone_break_retest(
+    ticker: str,
+    live_price: float,
+    bars: list[dict],
+    zone: dict,
+    timeframe: str,
+) -> dict | None:
+
+    zone_low = float(zone["low"])
+    zone_high = float(zone["high"])
+
+    # must be currently inside zone
+    if not (zone_low <= live_price <= zone_high):
+        return None
+
+    recent_bars = _latest_closed_5m_bars_in_lookback(bars)
+    if not recent_bars:
+        return None
+
+    # Bullish conditions
+    low_below_zone = any(
+        float(bar["low"]) < zone_low for bar in recent_bars
+    )
+
+    close_above_zone = any(
+        float(bar["close"]) > zone_high for bar in recent_bars
+    )
+
+    # Bearish conditions
+    high_above_zone = any(
+        float(bar["high"]) > zone_high for bar in recent_bars
+    )
+
+    close_below_zone = any(
+        float(bar["close"]) < zone_low for bar in recent_bars
+    )
+
+    # 🔵 Bullish retest
+    if low_below_zone and close_above_zone:
+        return {
+            "direction": "BULL RETEST",
+            "timeframe": timeframe,
+            "zone": zone,
+            "zone_low": round(zone_low, 2),
+            "zone_high": round(zone_high, 2),
+            "price": round(live_price, 2),
+            "lookback_hours": RETEST_LOOKBACK_HOURS,
+            "last_closed_bar": recent_bars[-1].get("date"),
+        }
+
+    # 🔴 Bearish retest
+    if high_above_zone and close_below_zone:
+        return {
+            "direction": "BEAR RETEST",
+            "timeframe": timeframe,
+            "zone": zone,
+            "zone_low": round(zone_low, 2),
+            "zone_high": round(zone_high, 2),
+            "price": round(live_price, 2),
+            "lookback_hours": RETEST_LOOKBACK_HOURS,
+            "last_closed_bar": recent_bars[-1].get("date"),
+        }
+
+    return None
+
+
+def _collect_break_retests_for_ticker(
+    ticker: str,
+    live_price: float,
+    daily_data: dict,
+    weekly_data: dict,
+    bars: list[dict],
+) -> list[dict]:
+    retests = []
+
+    zone_sources = []
+
+    for zone in daily_data.get("zones", []):
+        zone_sources.append(("daily", zone))
+
+    for zone in weekly_data.get("zones", []):
+        zone_sources.append(("weekly", zone))
+
+    try:
+        for zone in _get_previous_day_level_zones(ticker):
+            zone_sources.append((zone["type"], zone))
+    except Exception as e:
+        print(f"Previous-day retest zones skipped for {ticker.upper()}: {e}")
+
+    for timeframe, zone in zone_sources:
+        try:
+            retest = _check_zone_break_retest(
+                ticker=ticker,
+                live_price=live_price,
+                bars=bars,
+                zone=zone,
+                timeframe=timeframe,
+            )
+            if retest:
+                retests.append(retest)
+        except Exception as e:
+            print(f"Retest check skipped for {ticker.upper()} {timeframe}: {e}")
+
+    return retests
 
 def _check_ticker_worker(
     ticker: str,
@@ -571,12 +794,29 @@ def _check_ticker_worker(
     except Exception as e:
         print(f"Break check skipped for {ticker.upper()}: {e}")
 
+    bars = []
     volume_ratio = None
     try:
         bars = _get_recent_5m_bars_cached(ticker_lc, limit=1000)
         volume_ratio = _get_latest_5m_volume_ratio_from_bars(bars, ticker_lc)
     except Exception as e:
-        print(f"Volume ratio skipped for {ticker.upper()}: {e}")
+        print(f"5m data / volume ratio skipped for {ticker.upper()}: {e}")
+
+    retests = []
+    if bars:
+        retests = _collect_break_retests_for_ticker(
+            ticker=ticker_lc,
+            live_price=price,
+            daily_data=daily_data,
+            weekly_data=weekly_data,
+            bars=bars,
+        )
+
+    hourly_ema_240 = None
+    try:
+        hourly_ema_240 = _get_hourly_ema_proximity(ticker_lc, price)
+    except Exception as e:
+        print(f"Hourly EMA 240 skipped for {ticker.upper()}: {e}")
 
     return {
         "ticker": ticker.upper(),
@@ -584,6 +824,8 @@ def _check_ticker_worker(
         "hits": hits,
         "break": recent_break,
         "volume_ratio": volume_ratio,
+        "retests": retests,
+        "hourly_ema_240": hourly_ema_240,
     }
 
 
@@ -607,6 +849,24 @@ def _volume_ratio_text(volume_info: dict | None) -> str:
     return f"{volume_info['ratio']:.2f}"
 
 
+def _retest_text(retests: list[dict] | None) -> str:
+    if not retests:
+        return "-"
+
+    parts = []
+    for retest in retests[:2]:
+        direction = retest["direction"].replace(" RETEST", "")
+        timeframe = retest["timeframe"]
+        parts.append(
+            f"{direction} {timeframe} {retest['zone_low']}-{retest['zone_high']}"
+        )
+
+    if len(retests) > 2:
+        parts.append(f"+{len(retests) - 2}")
+
+    return "; ".join(parts)
+
+
 def _daily_text(result: dict) -> str:
     break_text = _break_text(result.get("break"))
     zone_text = _zone_text_for_timeframe(result["hits"], "daily")
@@ -619,56 +879,41 @@ def _daily_text(result: dict) -> str:
         return zone_text
     return "-"
 
-def _is_inside_previous_day_range(result: dict) -> bool:
-    """Return True when the live price is inside yesterday's low-high range."""
-    try:
-        prev_day = _get_previous_day_levels(result["ticker"])
-        prev_low = float(prev_day["low"])
-        prev_high = float(prev_day["high"])
-        price = float(result["price"])
 
-        return prev_low <= price <= prev_high
-
-    except Exception as e:
-        print(
-            f"Previous-day range filter skipped for "
-            f"{result.get('ticker', '?')}: {e}"
-        )
-        return False
-    
 def _build_dashboard_content(results: list[dict]) -> str:
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # active_results = [
-    #     r for r in results
-    #     if r["hits"] or r.get("break")
-    # ]
     active_results = [
-    r for r in results
-    if (r["hits"] or r.get("break"))
-    and not _is_inside_previous_day_range(r)
-]
+        r for r in results
+        if r["hits"] or r.get("break") or r.get("retests")
+    ]
 
     lines = []
     lines.append("```")
     lines.append("LIVE ZONE HITS")
     lines.append(f"Last Updated: {now_str}".center(92))
     lines.append("")
-    lines.append("Ticker  Price      Vol     Daily                         Weekly")
-    lines.append("------  ---------  ------  -----------------------------  -----------------------------")
+    lines.append("Ticker  Price      Vol     Daily                         Weekly                        Retest                         EMA240")
+    lines.append("------  ---------  ------  -----------------------------  ----------------------------  -----------------------------  --------")
 
     if not active_results:
-        lines.append("None    -          -       No active hits                 -")
+        lines.append("None    -          -       No active hits                 -                             -                              -")
     else:
         for result in sorted(active_results, key=lambda x: x["ticker"]):
             ticker = f"{result['ticker']:<6}"
             price = f"{result['price']:<9.2f}"
             vol_text = _volume_ratio_text(result.get("volume_ratio"))[:6]
             daily_text = _daily_text(result)[:29]
-            weekly_text = _zone_text_for_timeframe(result["hits"], "weekly")[:29]
+            weekly_text = _zone_text_for_timeframe(result["hits"], "weekly")[:28]
+            retest_text = _retest_text(result.get("retests"))[:29]
+            ema_info = result.get("hourly_ema_240")
+            if ema_info and ema_info.get("within_range"):
+                ema_text = f"{ema_info['distance_pct']:+.2f}%"
+            else:
+                ema_text = "-"
 
             lines.append(
-                f"{ticker}  {price}  {vol_text:<6}  {daily_text:<29}  {weekly_text:<29}"
+                f"{ticker}  {price}  {vol_text:<6}  {daily_text:<29}  {weekly_text:<28}  {retest_text:<29}  {ema_text:<8}"
             )
 
     lines.append("```")
@@ -740,6 +985,9 @@ def monitor_tickers_and_update_dashboard(
                 if result["hits"]:
                     parts.append("zone hit")
 
+                if result.get("retests"):
+                    parts.append(_retest_text(result.get("retests")))
+
                 print(" | ".join(parts))
             except Exception as e:
                 print(f"Error monitoring {ticker.upper()}: {e}")
@@ -752,7 +1000,7 @@ if __name__ == "__main__":
     tickers = ["tsla", "mu",
      "aapl", "amzn", "amd", "avgo",
     "googl", "intc", "meta", "msft", "nvda",
-    "orcl", "pltr", "nflx","mstr","hood","coin","baba","spy","qqq","SMH"]
+    "orcl", "pltr", "nflx","mstr","hood","coin","baba","spy","qqq"]
 
     unique_tickers = _get_unique_tickers(tickers)
 
