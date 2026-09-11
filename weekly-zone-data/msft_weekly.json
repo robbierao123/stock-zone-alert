@@ -1,0 +1,27 @@
+{
+  "ticker": "MSFT",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 19,
+  "zone_count": 3,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 426.82,
+      "high": 428.17,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 373.28,
+      "high": 373.35,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 466.32,
+      "high": 466.84,
+      "touches": 2
+    }
+  ]
+}

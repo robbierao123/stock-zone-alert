@@ -1,0 +1,39 @@
+{
+  "ticker": "NVDA",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 19,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 213.81,
+      "high": 214.39,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 213.89,
+      "high": 214.8,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 212.71,
+      "high": 212.72,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 191.14,
+      "high": 191.22,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 189.8,
+      "high": 190.01,
+      "touches": 2
+    }
+  ]
+}

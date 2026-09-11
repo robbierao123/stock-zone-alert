@@ -1,0 +1,39 @@
+{
+  "ticker": "AAPL",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 19,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 316.29,
+      "high": 317.4,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 307.0,
+      "high": 308.21,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 302.07,
+      "high": 302.42,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 309.42,
+      "high": 309.97,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 300.0,
+      "high": 300.57,
+      "touches": 2
+    }
+  ]
+}

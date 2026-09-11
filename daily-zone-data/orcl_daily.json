@@ -1,0 +1,38 @@
+{
+  "ticker": "ORCL",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 142.34,
+      "high": 142.6,
+      "touches": 5
+    },
+    {
+      "type": "resistance",
+      "low": 146.34,
+      "high": 146.79,
+      "touches": 5
+    },
+    {
+      "type": "resistance",
+      "low": 145.56,
+      "high": 146.08,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 140.94,
+      "high": 141.25,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 137.43,
+      "high": 137.55,
+      "touches": 3
+    }
+  ]
+}

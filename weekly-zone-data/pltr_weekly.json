@@ -1,0 +1,39 @@
+{
+  "ticker": "PLTR",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 19,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 131.15,
+      "high": 131.63,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 138.9,
+      "high": 139.02,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 124.81,
+      "high": 125.01,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 136.62,
+      "high": 136.88,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 137.43,
+      "high": 137.76,
+      "touches": 2
+    }
+  ]
+}

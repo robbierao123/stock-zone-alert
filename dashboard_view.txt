@@ -1,0 +1,11 @@
+LIVE ZONE HITS
+                             Last Updated: 2026-09-08 13:32:41                              
+
+Ticker  Price      Vol     Daily                         Weekly                        Retest
+------  ---------  ------  -----------------------------  ----------------------------  -----------------------------
+AMZN    257.06     0.48    HIT support 257.04-257.78      -                             BULL daily 257.04-257.78     
+META    617.88     0.24    NEAR HIGH 617.46               -                             -                            
+MU      1018.53    0.36    NEAR HIGH 1017.77              -                             -                            
+PLTR    172.00     0.45    HIT support 171.91-172.72      -                             -                            
+QQQ     720.49     0.69    NEAR HIGH 721.86               -                             -                            
+SPY     767.64     0.38    NEAR LOW 769.0; HIT support 7  -                             -

@@ -1,0 +1,38 @@
+{
+  "ticker": "COIN",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 146.94,
+      "high": 147.61,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 158.58,
+      "high": 158.88,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 160.8,
+      "high": 161.19,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 167.87,
+      "high": 168.5,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 189.0,
+      "high": 189.27,
+      "touches": 3
+    }
+  ]
+}

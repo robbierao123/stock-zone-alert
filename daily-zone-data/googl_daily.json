@@ -1,0 +1,38 @@
+{
+  "ticker": "GOOGL",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 340.0,
+      "high": 340.88,
+      "touches": 8
+    },
+    {
+      "type": "resistance",
+      "low": 346.2,
+      "high": 347.25,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 356.77,
+      "high": 358.02,
+      "touches": 5
+    },
+    {
+      "type": "resistance",
+      "low": 343.53,
+      "high": 344.87,
+      "touches": 5
+    },
+    {
+      "type": "resistance",
+      "low": 356.81,
+      "high": 358.58,
+      "touches": 5
+    }
+  ]
+}

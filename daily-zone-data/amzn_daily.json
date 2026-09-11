@@ -1,0 +1,38 @@
+{
+  "ticker": "AMZN",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 257.04,
+      "high": 257.78,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 258.24,
+      "high": 259.05,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 243.59,
+      "high": 244.41,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 248.45,
+      "high": 249.34,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 263.32,
+      "high": 264.36,
+      "touches": 4
+    }
+  ]
+}

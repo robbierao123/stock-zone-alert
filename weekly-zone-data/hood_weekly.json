@@ -1,0 +1,21 @@
+{
+  "ticker": "HOOD",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 19,
+  "zone_count": 2,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 112.45,
+      "high": 112.5,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 92.8,
+      "high": 93.03,
+      "touches": 2
+    }
+  ]
+}

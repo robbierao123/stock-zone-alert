@@ -1,0 +1,33 @@
+{
+  "ticker": "COIN",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 20,
+  "zone_count": 4,
+  "zones": [
+    {
+      "type": "support",
+      "low": 139.11,
+      "high": 139.18,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 181.35,
+      "high": 181.49,
+      "touches": 2
+    },
+    {
+      "type": "support",
+      "low": 146.02,
+      "high": 146.32,
+      "touches": 2
+    },
+    {
+      "type": "resistance",
+      "low": 191.36,
+      "high": 191.83,
+      "touches": 2
+    }
+  ]
+}
