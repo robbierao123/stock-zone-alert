@@ -1,0 +1,38 @@
+{
+  "ticker": "BABA",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "support",
+      "low": 111.82,
+      "high": 112.07,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 113.07,
+      "high": 113.41,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 129.19,
+      "high": 129.62,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 125.56,
+      "high": 126.07,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 116.85,
+      "high": 117.42,
+      "touches": 4
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "ticker": "META",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 599.97,
+      "high": 601.86,
+      "touches": 5
+    },
+    {
+      "type": "support",
+      "low": 577.0,
+      "high": 578.25,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 592.03,
+      "high": 594.45,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 585.62,
+      "high": 587.0,
+      "touches": 3
+    },
+    {
+      "type": "support",
+      "low": 603.66,
+      "high": 605.27,
+      "touches": 3
+    }
+  ]
+}

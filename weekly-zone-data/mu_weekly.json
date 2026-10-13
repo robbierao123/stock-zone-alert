@@ -1,0 +1,21 @@
+{
+  "ticker": "MU",
+  "timeframe": "weekly",
+  "source_daily_lookback": 90,
+  "weekly_candle_count": 20,
+  "zone_count": 2,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 1035.5,
+      "high": 1038.75,
+      "touches": 3
+    },
+    {
+      "type": "resistance",
+      "low": 1011.77,
+      "high": 1012.62,
+      "touches": 2
+    }
+  ]
+}

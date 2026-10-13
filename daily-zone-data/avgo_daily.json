@@ -1,0 +1,38 @@
+{
+  "ticker": "AVGO",
+  "timeframe": "daily",
+  "lookback_days": 45,
+  "zone_count": 5,
+  "zones": [
+    {
+      "type": "resistance",
+      "low": 385.78,
+      "high": 386.74,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 378.75,
+      "high": 380.0,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 426.5,
+      "high": 428.03,
+      "touches": 4
+    },
+    {
+      "type": "support",
+      "low": 375.96,
+      "high": 377.54,
+      "touches": 4
+    },
+    {
+      "type": "resistance",
+      "low": 397.33,
+      "high": 399.0,
+      "touches": 4
+    }
+  ]
+}
