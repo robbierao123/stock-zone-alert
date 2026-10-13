@@ -33,9 +33,9 @@ BREAK_MAX_PCT = float(os.getenv("BREAK_MAX_PCT", 0.3))
 HOURLY_EMA_PERIOD = int(os.getenv("HOURLY_EMA_PERIOD", 240))
 HOURLY_EMA_PROXIMITY_PCT = float(os.getenv("HOURLY_EMA_PROXIMITY_PCT", 0.5))
 FOUR_HOUR_EMA_PERIOD = int(os.getenv("FOUR_HOUR_EMA_PERIOD", 240))
-# Shared one-hour history powers both EMA240 timeframes. FMP can return less
-# intraday history than requested, so we fetch missing history in small,
-# rate-spaced date windows and keep it on disk across restarts.
+# Both EMA240 timeframes use FMP EXTENDED-hours 1H candles (04:00-20:00 ET).
+# Extended-hours history is kept separate from old regular-hours history.
+# FMP can truncate long ranges, so backfill in rate-spaced historical chunks.
 HOURLY_HISTORY_DAYS = int(os.getenv("HOURLY_HISTORY_DAYS", 300))
 HOURLY_HISTORY_CACHE_DIR = os.getenv("HOURLY_HISTORY_CACHE_DIR", "ema240-hourly-history")
 HOURLY_BACKFILL_CHUNK_DAYS = max(15, int(os.getenv("HOURLY_BACKFILL_CHUNK_DAYS", 55)))
@@ -65,7 +65,7 @@ QUOTE_CACHE_LOCK = threading.Lock()
 # Limit *all* FMP request types to avoid a 60-request simultaneous burst.
 FMP_REQUEST_LIMIT = threading.BoundedSemaphore(4)
 
-# 4-hour EMA cache: refresh when a regular-session 4H candle closes.
+# 4-hour EMA cache: refresh after an extended-session 4H block closes.
 FOUR_HOUR_EMA_CACHE: dict[str, tuple[float, tuple[int, int, int, int]]] = {}
 FOUR_HOUR_EMA_CACHE_LOCK = threading.Lock()
 
@@ -454,23 +454,26 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
     }
 
 
-def _current_hour_bucket() -> tuple[int, int, int, int, int]:
-    """Last completed RTH hour; no hourly refetch overnight or weekends."""
-    now = datetime.now(ZoneInfo("America/New_York"))
-    minute_of_day = now.hour * 60 + now.minute
-    # Earliest 09:30 candle closes at 10:30 NY time. Until then,
-    # re-use the last trading session's closing-bar snapshot.
-    if now.weekday() >= 5 or minute_of_day < 10 * 60 + 30:
-        previous = now.date() - timedelta(days=1)
-        while previous.weekday() >= 5:
-            previous -= timedelta(days=1)
-        return (previous.year, previous.month, previous.day, 16, 0)
+def _previous_weekday(day):
+    """Approximate previous market date for overnight/weekend EMA cache keys."""
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
 
-    for close_minute in (960, 930, 870, 810, 750, 690, 630):
-        if minute_of_day >= close_minute:
-            return (now.year, now.month, now.day,
-                    close_minute // 60, close_minute % 60)
-    raise RuntimeError("Unreachable hourly cache bucket")
+
+def _current_hour_bucket() -> tuple[int, int, int, int]:
+    """Latest completed EXTENDED hour (04:00-20:00 ET), not regular hours.
+
+    Avoid refreshing historical data each 5-second dashboard redraw or
+    repeatedly overnight. FMP extended 1H candles start on whole hours.
+    """
+    now = datetime.now(ZoneInfo("America/New_York"))
+    if now.weekday() >= 5 or now.hour < 5:
+        previous = _previous_weekday(now.date())
+        return (previous.year, previous.month, previous.day, 20)
+    end_hour = min(now.hour, 20)
+    return (now.year, now.month, now.day, end_hour)
 
 
 def _get_live_price_cached(ticker: str) -> float:
@@ -490,43 +493,41 @@ def _get_live_price_cached(ticker: str) -> float:
 
 
 def _closed_hourly_bars(rows: list[dict], now: datetime) -> list[dict]:
-    """Normalize hourly FMP candles; discard anything not fully closed."""
+    """Normalize only completed FMP EXTENDED hourly bars (04:00-20:00 ET).
+
+    Handles both full FMP OHLCV data and close-only history written by the
+    standalone SPY comparison script (spy_1h_extended.json).
+    """
     output = {}
     for row in rows:
         try:
             stamp = str(row.get("date") or row.get("datetime") or "")
             start = _parse_fmp_hourly_bar_time(stamp)
-            if start is None:
+            if start is None or start.minute != 0 or not (4 <= start.hour < 20):
                 continue
-            end = start + timedelta(hours=1)
-            # Last regular-session hourly bar is a 30-minute candle.
-            if start.hour == 15 and start.minute == 30:
-                end = start.replace(hour=16, minute=0, second=0)
-            if end > now:
+            if start + timedelta(hours=1) > now:
                 continue
-            output[stamp] = {
-                "date": stamp,
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": float(row.get("volume", 0)),
-            }
+            normalized = {"date": start.strftime("%Y-%m-%d %H:%M:%S"),
+                          "close": float(row["close"])}
+            for key in ("open", "high", "low", "volume"):
+                if row.get(key) is not None:
+                    normalized[key] = float(row[key])
+            output[normalized["date"]] = normalized
         except (ValueError, TypeError, KeyError):
             continue
     return sorted(output.values(), key=lambda bar: bar["date"])
 
 
 def _fetch_hourly_range(ticker: str, from_date: str, to_date: str) -> list[dict]:
-    """The ONLY market-data source used by both EMA timeframes: FMP 1hour."""
+    """Shared source for both EMA timeframes: FMP 1hour extended=true."""
     if not FMP_API_KEY:
         raise ValueError("FMP_API_KEY is missing in .env")
     params = {
         "symbol": ticker,
         "from": from_date,
         "to": to_date,
-        # Match the regular-session and adjusted-price Webull chart settings.
-        "extended": "false",
+        # Matches the verified FMP extended-hours EMA test for SPY.
+        "extended": "true",
         "nonadjusted": "false",
         "apikey": FMP_API_KEY,
     }
@@ -551,12 +552,20 @@ def _merge_hourly_bars(*groups: list[dict]) -> list[dict]:
 
 
 def _hourly_history_cache_path(ticker: str) -> Path:
-    return Path(HOURLY_HISTORY_CACHE_DIR) / f"{ticker.lower()}_1h.json"
+    # Never merge 09:30-offset regular-hours bars into the whole-hour series.
+    # Reuses history from spy_ema240_extended_test.py when available.
+    return Path(HOURLY_HISTORY_CACHE_DIR) / f"{ticker.lower()}_1h_extended.json"
 
 
 def _read_saved_hourly_bars(ticker: str) -> list[dict]:
     payload = _load_json_file(str(_hourly_history_cache_path(ticker)), {})
-    return payload.get("bars", []) if isinstance(payload, dict) else []
+    if not isinstance(payload, dict):
+        return []
+    if payload.get("ticker", ticker).lower() != ticker.lower():
+        return []
+    if payload.get("session", "extended") != "extended":
+        return []
+    return payload.get("bars", [])
 
 
 def _save_hourly_bars(ticker: str, bars: list[dict]) -> None:
@@ -565,7 +574,7 @@ def _save_hourly_bars(ticker: str, bars: list[dict]) -> None:
     # Atomic replacement prevents corrupting history on abrupt exit.
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
-        json.dump({"ticker": ticker.upper(), "bars": bars}, f)
+        json.dump({"ticker": ticker.upper(), "session": "extended", "bars": bars}, f)
     os.replace(tmp, path)
 
 
@@ -579,7 +588,7 @@ def _fetch_hourly_bars(ticker: str) -> list[dict]:
 
 
 def _get_shared_hourly_bars_cached(ticker: str) -> list[dict]:
-    """One recent hourly download per ticker/hour, plus stored older pages."""
+    """One extended-hour download per ticker/hour, plus stored older pages."""
     ticker_lc = ticker.lower()
     bucket = _current_hour_bucket()
     with SHARED_HOURLY_BARS_LOCK:
@@ -592,7 +601,10 @@ def _get_shared_hourly_bars_cached(ticker: str) -> list[dict]:
             if saved and saved[1] == bucket:
                 return saved[0]
         # Disk history may have been built in a previous process run.
-        prior = saved[0] if saved else _read_saved_hourly_bars(ticker_lc)
+        prior = saved[0] if saved else _closed_hourly_bars(
+            _read_saved_hourly_bars(ticker_lc),
+            datetime.now(ZoneInfo("America/New_York")),
+        )
         try:
             recent = _fetch_hourly_bars(ticker_lc)
         except Exception:
@@ -633,7 +645,7 @@ def _schedule_history_backfill(ticker: str) -> None:
 
 
 def _history_backfill_worker() -> None:
-    """Backfill OLD 1H candles one request at a time, only for active tickers."""
+    """Backfill OLD extended 1H candles sequentially, for active tickers."""
     while True:
         ticker = HISTORY_BACKFILL_QUEUE.get()
         try:
@@ -641,7 +653,7 @@ def _history_backfill_worker() -> None:
             with SHARED_HOURLY_BARS_LOCK:
                 current = SHARED_HOURLY_BARS_CACHE.get(ticker)
             if current:
-                complete_count = len(_aggregate_regular_session_4h(
+                complete_count = len(_aggregate_extended_session_4h(
                     current[0], datetime.now(ZoneInfo("America/New_York"))
                 ))
                 if complete_count < HOURLY_BACKFILL_TARGET_4H:
@@ -663,7 +675,7 @@ def _history_backfill_worker() -> None:
 def _backfill_one_ticker(ticker: str) -> None:
     now = datetime.now(ZoneInfo("America/New_York"))
     bars = _get_shared_hourly_bars_cached(ticker)
-    count = len(_aggregate_regular_session_4h(bars, now))
+    count = len(_aggregate_extended_session_4h(bars, now))
     print(f"EMA history {ticker.upper()}: {count} closed 4H candles; target {HOURLY_BACKFILL_TARGET_4H}")
     if not bars:
         return
@@ -687,7 +699,7 @@ def _backfill_one_ticker(ticker: str) -> None:
             print(f"EMA history {ticker.upper()}: older FMP page added no bars")
             return
         bars = new_bars
-        count = len(_aggregate_regular_session_4h(bars, now))
+        count = len(_aggregate_extended_session_4h(bars, now))
         with SHARED_HOURLY_SYMBOL_LOCKS[ticker]:
             with SHARED_HOURLY_BARS_LOCK:
                 saved = SHARED_HOURLY_BARS_CACHE.get(ticker)
@@ -751,20 +763,18 @@ def _get_hourly_ema_proximity(ticker: str, live_price: float) -> dict | None:
 
 
 def _current_four_hour_bucket() -> tuple[int, int, int, int]:
-    """NY session-based cache bucket: before 13:30, 13:30-16:00, after 16:00.
-
-    Regular-session 4-hour candles are based on 09:30-13:30 and the
-    remaining 13:30-16:00 session. Using the closing boundaries avoids
-    unnecessary API requests on each 5-second dashboard refresh.
-    """
+    """Latest closed EXTENDED 4H block ending 08, 12, 16, or 20 NY time."""
     now = datetime.now(ZoneInfo("America/New_York"))
-    minute_of_day = now.hour * 60 + now.minute
-    phase = 0 if minute_of_day < 13 * 60 + 30 else (1 if minute_of_day < 16 * 60 else 2)
-    return (now.year, now.month, now.day, phase)
+    if now.weekday() >= 5 or now.hour < 8:
+        previous = _previous_weekday(now.date())
+        return (previous.year, previous.month, previous.day, 20)
+    end_hour = 8 if now.hour < 12 else (12 if now.hour < 16 else
+                                     (16 if now.hour < 20 else 20))
+    return (now.year, now.month, now.day, end_hour)
 
 
 def _parse_fmp_hourly_bar_time(value: str) -> datetime | None:
-    """FMP hourly timestamps represent candle starts in US Eastern time."""
+    """FMP 1H timestamps are US Eastern start times (04:00 on extended)."""
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
             return datetime.strptime(str(value), fmt).replace(
@@ -775,55 +785,42 @@ def _parse_fmp_hourly_bar_time(value: str) -> datetime | None:
     return None
 
 
-def _aggregate_regular_session_4h(hourly_bars: list[dict], now: datetime) -> list[dict]:
-    """Create 4H chart candles from 1H bars, based on US stock sessions.
+def _aggregate_extended_session_4h(hourly_bars: list[dict], now: datetime) -> list[dict]:
+    """Construct the same extended 4H blocks as spy_ema240_extended_test.py.
 
-    A regular US stock session is 09:30-16:00 ET. The corresponding 4H
-    chart contains the 09:30-13:30 block (four 1H bars) and a shorter
-    13:30-16:00 block (three 1H bars, final 1H bar is just 30 minutes).
-    Do not combine candles across different trading dates, include overnight
-    bars, or allow a partially formed 4H candle into the EMA.
+    Four full hourly candles per block: 04-08, 08-12, 12-16, 16-20 ET.
+    Incomplete/gappy blocks are skipped; no regular-session bars are mixed in.
     """
-    session_buckets = defaultdict(dict)
-    tz = ZoneInfo("America/New_York")
+    grouped = defaultdict(dict)
     for bar in hourly_bars:
         start = _parse_fmp_hourly_bar_time(bar.get("date", ""))
-        if start is None:
+        if start is None or start.minute != 0 or not (4 <= start.hour < 20):
             continue
-        minute = start.hour * 60 + start.minute
-        if minute < 9 * 60 + 30 or minute >= 16 * 60:
-            continue
-        session = 0 if minute < 13 * 60 + 30 else 1
-        session_buckets[(start.date(), session)][minute] = bar
+        block_hour = 4 + ((start.hour - 4) // 4) * 4
+        grouped[(start.date(), block_hour)][start.hour] = bar
 
-    expected = (
-        (9 * 60 + 30, 10 * 60 + 30, 11 * 60 + 30, 12 * 60 + 30),
-        (13 * 60 + 30, 14 * 60 + 30, 15 * 60 + 30),
-    )
-    four_hour_bars = []
-    for (trading_date, session), time_map in sorted(session_buckets.items()):
-        # Skip incomplete/gappy blocks rather than treating partial data as
-        # the last 4H closing price. This also avoids using the live 4H bar.
-        if not all(minute in time_map for minute in expected[session]):
+    out = []
+    for (trading_date, block_hour), candles in sorted(grouped.items()):
+        expected_hours = range(block_hour, block_hour + 4)
+        if not all(hour in candles for hour in expected_hours):
             continue
-        close_hour, close_minute = ((13, 30) if session == 0 else (16, 0))
-        candle_end = datetime.combine(trading_date, datetime.min.time(), tzinfo=tz)
-        candle_end = candle_end.replace(hour=close_hour, minute=close_minute)
-        if candle_end > now:
+        block_end = datetime.combine(trading_date, datetime.min.time(),
+                                     tzinfo=ZoneInfo("America/New_York"))
+        block_end = block_end.replace(hour=block_hour + 4)
+        if block_end > now:
             continue
-        final_hourly = time_map[expected[session][-1]]
-        four_hour_bars.append({
-            "date": f"{trading_date.isoformat()} {'09:30' if session == 0 else '13:30'}:00",
-            "close": float(final_hourly["close"]),
+        out.append({
+            "date": f"{trading_date.isoformat()} {block_hour:02d}:00:00",
+            "close": float(candles[block_hour + 3]["close"]),
         })
-    return four_hour_bars
+    return out
 
 
 def _fetch_four_hour_bars(ticker: str) -> list[dict]:
-    """Build CLOSED regular-session 4H candles from FMP's 1H candles."""
+    """Build CLOSED EXTENDED 4H candles from shared FMP 1H candles."""
     now = datetime.now(ZoneInfo("America/New_York"))
     history = _get_shared_hourly_bars_cached(ticker)
-    bars = _aggregate_regular_session_4h(history, now)
+    bars = _aggregate_extended_session_4h(history, now)
     if len(bars) < FOUR_HOUR_EMA_PERIOD:
         raise ValueError(
             f"Only {len(bars)} valid 4H bars for {ticker}; "
@@ -964,7 +961,7 @@ def _check_ticker_worker(
     if (hits or recent_break) and four_hour_ema_240 is not None:
         with SHARED_HOURLY_BARS_LOCK:
             shared = SHARED_HOURLY_BARS_CACHE.get(ticker_lc)
-        if shared and len(_aggregate_regular_session_4h(
+        if shared and len(_aggregate_extended_session_4h(
             shared[0], datetime.now(ZoneInfo("America/New_York"))
         )) < HOURLY_BACKFILL_TARGET_4H:
             _schedule_history_backfill(ticker_lc)
@@ -1030,7 +1027,7 @@ def _build_dashboard_content(results: list[dict]) -> str:
 
     lines = []
     lines.append("```")
-    lines.append("LIVE ZONE HITS")
+    lines.append("LIVE ZONE HITS (EMA240: EXTENDED HOURS 04:00-20:00 ET)")
     lines.append(f"Last Updated: {now_str}".center(112))
     lines.append("")
     # EMA columns show both the computed EMA price level and the signed distance.
@@ -1157,7 +1154,7 @@ if __name__ == "__main__":
         weekly_limit=WEEKLY_LIMIT,
     )
 
-    print("Starting combined zone + previous-day break dashboard...\n")
+    print("Starting combined zone + previous-day break dashboard (extended-hours EMA240)...\n")
 
     while True:
         try:
