@@ -2,6 +2,7 @@ import json
 import os
 import time
 import threading
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -44,6 +45,14 @@ HOURLY_BACKFILL_DELAY_SECONDS = max(1.0, float(os.getenv("HOURLY_BACKFILL_DELAY_
 HOURLY_BACKFILL_RETRY_SECONDS = max(60, int(os.getenv("HOURLY_BACKFILL_RETRY_SECONDS", 180)))
 # The window redraws every 5s, but quote requests are capped to avoid FMP 429s.
 QUOTE_REFRESH_SECONDS = max(5, int(os.getenv("QUOTE_REFRESH_SECONDS", 20)))
+# Confirmed ORB breakouts can also become dashboard rows, even without zone hits.
+# Set ORB15_INCLUDE_BREAKOUT_TICKERS=false to show ORB only on existing rows.
+ORB15_INCLUDE_BREAKOUT_TICKERS = os.getenv("ORB15_INCLUDE_BREAKOUT_TICKERS", "true").strip().lower() not in {"false", "0", "no", "off"}
+# Preserve the existing 5-second dashboard cadence by default.
+# Increase DISCORD_REFRESH_SECONDS in .env only if your webhook is rate-limited.
+DISCORD_REFRESH_SECONDS = max(5, int(os.getenv("DISCORD_REFRESH_SECONDS", "5")))
+DISCORD_PAGE_MAX_CHARS = 1900  # Discord rejects webhook content over 2,000 characters.
+DISCORD_NEXT_UPDATE_AT = 0.0
 
 # Daily historical cache: built once outside the while loop
 PREV_DAY_LEVELS_CACHE: dict[str, dict] = {}
@@ -104,7 +113,16 @@ def _save_json_file(path: str, payload) -> None:
 def _safe_error_text(error: Exception) -> str:
     """requests HTTPError URLs include the apikey; avoid leaking it in logs."""
     message = str(error)
-    return message.replace(FMP_API_KEY, "[REDACTED_API_KEY]") if FMP_API_KEY else message
+    if FMP_API_KEY:
+        message = message.replace(FMP_API_KEY, "[REDACTED_API_KEY]")
+    if DISCORD_WEBHOOK_URL:
+        message = message.replace(DISCORD_WEBHOOK_URL, "[REDACTED_DISCORD_WEBHOOK]")
+    # Also redact URLs if the configured webhook uses a different Discord hostname.
+    message = re.sub(
+        r"https?://(?:discord(?:app)?\.com)/api/webhooks/[^\s]+",
+        "[REDACTED_DISCORD_WEBHOOK]", message, flags=re.IGNORECASE,
+    )
+    return message
 
 
 def _discord_webhook_wait_url() -> str:
@@ -157,6 +175,99 @@ def _get_or_create_dashboard_message(initial_content: str) -> str:
     new_message_id = _send_dashboard_message(initial_content)
     _save_json_file(DASHBOARD_STATE_FILE, {"message_id": new_message_id})
     return new_message_id
+
+
+
+def _delete_dashboard_message(message_id: str) -> None:
+    """Clean up surplus Discord pages if the active row count shrinks."""
+    response = requests.delete(f"{DISCORD_WEBHOOK_URL}/messages/{message_id}", timeout=20)
+    if response.status_code not in (200, 204, 404):
+        response.raise_for_status()
+
+
+def _split_dashboard_for_discord(content: str) -> list[str]:
+    """Repeat the table header on each page without dropping ANY ticker rows.
+
+    The full (possibly >2,000-character) table remains in dashboard_view.txt.
+    Each Discord webhook message is a self-contained, aligned code block.
+    """
+    raw = _content_for_local_view(content).splitlines()
+    header, rows = raw[:5], raw[5:]
+    if len(header) < 5:
+        raise ValueError("Unexpected dashboard text format")
+
+    def render(page_rows: list[str]) -> str:
+        return "\n".join(["```", *header, *page_rows, "```"])
+
+    page_rows: list[list[str]] = []
+    current: list[str] = []
+    for row in rows:
+        if len(render(current + [row])) > DISCORD_PAGE_MAX_CHARS and current:
+            page_rows.append(current)
+            current = []
+        if len(render([row])) > DISCORD_PAGE_MAX_CHARS:
+            raise ValueError("One dashboard row is too large for Discord")
+        current.append(row)
+    if current or not page_rows:
+        page_rows.append(current)
+    pages = [render(part) for part in page_rows]
+    assert all(len(page) <= DISCORD_PAGE_MAX_CHARS for page in pages)
+    return pages
+
+
+def _sync_discord_dashboard_pages(pages: list[str]) -> list[str]:
+    """Edit existing webhook messages and create/delete pages as needed.
+
+    Supports previous dashboard_state.json files containing only message_id.
+    No duplicate edits are sent (the old updater edited its first page twice).
+    """
+    state = _load_json_file(DASHBOARD_STATE_FILE, {})
+    if not isinstance(state, dict):
+        state = {}
+    previous = state.get("message_ids")
+    if not isinstance(previous, list):
+        previous = [state["message_id"]] if state.get("message_id") else []
+    previous = [str(value) for value in previous if value]
+    stale = [str(value) for value in state.get("stale_message_ids", []) if value]
+
+    active: list[str] = []
+    for index, page in enumerate(pages):
+        message_id = previous[index] if index < len(previous) else None
+        if message_id:
+            try:
+                _edit_dashboard_message(message_id, page)
+            except requests.HTTPError as exc:
+                # Deleted/unknown prior messages can safely be replaced.
+                if exc.response is None or exc.response.status_code not in (404, 410):
+                    raise
+                message_id = _send_dashboard_message(page)
+        else:
+            message_id = _send_dashboard_message(page)
+        active.append(message_id)
+        # Keep partial progress even if a later page fails: don't create
+        # an extra copy of page 1 on the next refresh.
+        state["message_id"] = active[0]
+        state["message_ids"] = active + previous[len(active):]
+        _save_json_file(DASHBOARD_STATE_FILE, state)
+
+    # Delete old page messages after shrinking (retry deletion if it fails).
+    for extra_id in dict.fromkeys(previous[len(pages):] + stale):
+        if extra_id in active:
+            continue
+        try:
+            _delete_dashboard_message(extra_id)
+        except Exception as exc:
+            print(f"Discord old-page cleanup deferred: {_safe_error_text(exc)}")
+            if extra_id not in state.get("stale_message_ids", []):
+                state.setdefault("stale_message_ids", []).append(extra_id)
+        else:
+            if extra_id in state.get("stale_message_ids", []):
+                state["stale_message_ids"].remove(extra_id)
+
+    state["message_ids"] = active
+    state["message_id"] = active[0]
+    _save_json_file(DASHBOARD_STATE_FILE, state)
+    return active
 
 
 def _load_zone_file(file_path: Path) -> dict:
@@ -452,6 +563,69 @@ def _get_latest_5m_volume_ratio_from_bars(bars: list[dict], ticker: str) -> dict
         "days_used": days_used,
         "days_count": len(days_used),
     }
+
+
+def _get_15m_orb_status(bars: list[dict], live_price: float, now: datetime | None = None) -> str:
+    """Classify the *current price* vs today's NYSE 09:30-09:45 ET opening range.
+
+    '-'   = currently inside the 15-minute range (or range not yet available).
+    'YES' = currently outside AND a completed 5-minute candle since 09:45
+            has closed past the same boundary during this trading day.
+    'NO'  = currently outside, but no completed 5-minute close confirmed
+            a breakout in the current direction.
+
+    Reuses the already-fetched FMP 5-minute bars. Never uses an unfinished
+    candle or premarket candles to build/confirm the opening range.
+    """
+    ny = ZoneInfo("America/New_York")
+    now = datetime.now(ny) if now is None else now.astimezone(ny)
+    # ORB is a regular-market-hours signal only; after 16:00 ET it must
+    # disappear, including the ORB-only ticker rows that it had triggered.
+    minute_now = now.hour * 60 + now.minute
+    if now.weekday() >= 5 or not (9 * 60 + 30 <= minute_now < 16 * 60):
+        return "-"
+
+    opening_minutes = (9 * 60 + 30, 9 * 60 + 35, 9 * 60 + 40)
+    start_breakout = 9 * 60 + 45
+    opening = {}
+    after_opening = []
+
+    for bar in bars:
+        stamp = str(bar.get("date") or bar.get("datetime") or "")
+        try:
+            start = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                start = datetime.strptime(stamp, "%Y-%m-%d %H:%M")
+            except ValueError:
+                continue
+        start = start.replace(tzinfo=ny)
+        if start.date() != now.date() or start + timedelta(minutes=5) > now:
+            continue
+        minute = start.hour * 60 + start.minute
+        if minute in opening_minutes:
+            opening[minute] = bar
+        elif start_breakout <= minute < 16 * 60:
+            after_opening.append(bar)
+
+    # Must have all three *completed* opening candles before evaluating ORB.
+    if not all(minute in opening for minute in opening_minutes):
+        return "-"
+
+    try:
+        opening_high = max(float(opening[m]["high"]) for m in opening_minutes)
+        opening_low = min(float(opening[m]["low"]) for m in opening_minutes)
+        price = float(live_price)
+    except (KeyError, TypeError, ValueError):
+        return "-"
+
+    if opening_low <= price <= opening_high:
+        return "-"
+    if price > opening_high:
+        confirmed = any(float(bar["close"]) > opening_high for bar in after_opening)
+    else:
+        confirmed = any(float(bar["close"]) < opening_low for bar in after_opening)
+    return "YES" if confirmed else "NO"
 
 
 def _previous_weekday(day):
@@ -934,11 +1108,21 @@ def _check_ticker_worker(
         print(f"Break check skipped for {ticker.upper()}: {_safe_error_text(e)}")
 
     volume_ratio = None
+    bars = None
     try:
         bars = _get_recent_5m_bars_cached(ticker_lc, limit=1000)
         volume_ratio = _get_latest_5m_volume_ratio_from_bars(bars, ticker_lc)
     except Exception as e:
         print(f"5m data / volume ratio skipped for {ticker.upper()}: {_safe_error_text(e)}")
+
+    # Use the 5m bars already fetched for volume (no extra market-data call).
+    orb_15m = "-"
+    if bars is not None:
+        try:
+            orb_15m = _get_15m_orb_status(bars, price)
+        except Exception as e:
+            print(f"15m ORB skipped for {ticker.upper()}: {_safe_error_text(e)}")
+    orb_is_active = ORB15_INCLUDE_BREAKOUT_TICKERS and orb_15m == "YES"
 
     hourly_ema_240 = None
     try:
@@ -952,13 +1136,13 @@ def _check_ticker_worker(
     except ValueError as e:
         # Only fetch older history for actual displayed rows; it is queued
         # in a single background worker to avoid the previous FMP 429 storm.
-        if hits or recent_break:
+        if hits or recent_break or orb_is_active:
             _schedule_history_backfill(ticker_lc)
         # Avoid repeating the same warning for all 20 symbols every 5s.
     except Exception as e:
         print(f"4-hour EMA 240 skipped for {ticker.upper()}: {type(e).__name__}")
 
-    if (hits or recent_break) and four_hour_ema_240 is not None:
+    if (hits or recent_break or orb_is_active) and four_hour_ema_240 is not None:
         with SHARED_HOURLY_BARS_LOCK:
             shared = SHARED_HOURLY_BARS_CACHE.get(ticker_lc)
         if shared and len(_aggregate_extended_session_4h(
@@ -972,6 +1156,7 @@ def _check_ticker_worker(
         "hits": hits,
         "break": recent_break,
         "volume_ratio": volume_ratio,
+        "orb_15m": orb_15m,
         "hourly_ema_240": hourly_ema_240,
         "four_hour_ema_240": four_hour_ema_240,
     }
@@ -1022,7 +1207,8 @@ def _build_dashboard_content(results: list[dict]) -> str:
 
     active_results = [
         r for r in results
-        if r["hits"] or r.get("break")
+        if r["hits"] or r.get("break") or
+        (ORB15_INCLUDE_BREAKOUT_TICKERS and r.get("orb_15m") == "YES")
     ]
 
     lines = []
@@ -1031,11 +1217,11 @@ def _build_dashboard_content(results: list[dict]) -> str:
     lines.append(f"Last Updated: {now_str}".center(112))
     lines.append("")
     # EMA columns show both the computed EMA price level and the signed distance.
-    lines.append(f"{'Ticker':<6}  {'Price':<9}  {'Vol':<6}  {'Daily':<29}  {'Weekly':<28}  {'EMA240(1H)':<20}  {'EMA240(4H)':<20}")
-    lines.append(f"{'-' * 6}  {'-' * 9}  {'-' * 6}  {'-' * 29}  {'-' * 28}  {'-' * 20}  {'-' * 20}")
+    lines.append(f"{'Ticker':<6}  {'Price':<9}  {'Vol':<6}  {'Daily':<29}  {'Weekly':<28}  {'EMA240(1H)':<20}  {'EMA240(4H)':<20}  {'15m ORB':<7}")
+    lines.append(f"{'-' * 6}  {'-' * 9}  {'-' * 6}  {'-' * 29}  {'-' * 28}  {'-' * 20}  {'-' * 20}  {'-' * 7}")
 
     if not active_results:
-        lines.append(f"{'None':<6}  {'-':<9}  {'-':<6}  {'No active hits':<29}  {'-':<28}  {'-':<20}  {'-':<20}")
+        lines.append(f"{'None':<6}  {'-':<9}  {'-':<6}  {'No active hits':<29}  {'-':<28}  {'-':<20}  {'-':<20}  {'-':<7}")
     else:
         for result in sorted(active_results, key=lambda x: x["ticker"]):
             ticker = f"{result['ticker']:<6}"
@@ -1045,9 +1231,10 @@ def _build_dashboard_content(results: list[dict]) -> str:
             weekly_text = _zone_text_for_timeframe(result["hits"], "weekly")[:28]
             ema_text = _ema_value_and_distance_text(result.get("hourly_ema_240"))
             four_hour_ema_text = _ema_value_and_distance_text(result.get("four_hour_ema_240"))
+            orb_text = result.get("orb_15m", "-")
 
             lines.append(
-                f"{ticker}  {price}  {vol_text:<6}  {daily_text:<29}  {weekly_text:<28}  {ema_text:<20}  {four_hour_ema_text:<20}"
+                f"{ticker}  {price}  {vol_text:<6}  {daily_text:<29}  {weekly_text:<28}  {ema_text:<20}  {four_hour_ema_text:<20}  {orb_text:<7}"
             )
 
     lines.append("```")
@@ -1072,11 +1259,28 @@ def _save_dashboard_view(content: str) -> None:
 
 
 def update_dashboard_message(results: list[dict]) -> None:
+    global DISCORD_NEXT_UPDATE_AT
     content = _build_dashboard_content(results)
+    # Always refresh the FULL local dashboard every cycle, regardless of
+    # Discord rate limits, network problems, or the number of active tickers.
     _save_dashboard_view(content)
-    message_id = _get_or_create_dashboard_message(content)
-    _edit_dashboard_message(message_id, content)
-    print(f"Dashboard updated: message_id={message_id}")
+    now = time.monotonic()
+    if now < DISCORD_NEXT_UPDATE_AT:
+        return
+    try:
+        pages = _split_dashboard_for_discord(content)
+        message_ids = _sync_discord_dashboard_pages(pages)
+    except Exception as exc:
+        # Do not let Discord errors stop local updates. HTTPError may contain
+        # a webhook secret in its URL, so always redact before printing.
+        details = ""
+        if isinstance(exc, requests.HTTPError) and exc.response is not None:
+            details = f" (HTTP {exc.response.status_code}: {_safe_error_text(exc.response.text[:180])})"
+        print(f"Discord dashboard update deferred: {_safe_error_text(exc)}{details}")
+        DISCORD_NEXT_UPDATE_AT = time.monotonic() + max(30, DISCORD_REFRESH_SECONDS)
+        return
+    DISCORD_NEXT_UPDATE_AT = time.monotonic() + DISCORD_REFRESH_SECONDS
+    print(f"Discord dashboard updated: {len(pages)} page(s), messages={len(message_ids)}")
 
 
 def monitor_tickers_and_update_dashboard(
@@ -1122,6 +1326,8 @@ def monitor_tickers_and_update_dashboard(
                 # Include the actual 1H/4H EMA240 levels in every ticker update.
                 parts.append(f"EMA240(1H) {_ema_value_and_distance_text(result.get('hourly_ema_240'))}")
                 parts.append(f"EMA240(4H) {_ema_value_and_distance_text(result.get('four_hour_ema_240'))}")
+                if result["hits"] or result.get("break") or (ORB15_INCLUDE_BREAKOUT_TICKERS and result.get("orb_15m") == "YES"):
+                    parts.append(f"15m ORB {result.get('orb_15m', '-')}")
 
                 print(" | ".join(parts))
             except Exception as e:
